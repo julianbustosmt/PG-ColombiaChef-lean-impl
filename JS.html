@@ -217,6 +217,93 @@ async function renderDashboard() {
     d.evolucionCumplimiento.map(p => p.valor), '% cumplimiento');
   doughnutChart('c-estado', d.hallazgosPorEstado.map(x => x.etiqueta), d.hallazgosPorEstado.map(x => x.valor));
   barChart('c-mod', d.topModulosProblema.map(x => x.modulo), d.topModulosProblema.map(x => x.abiertos), 'Abiertos');
+
+  // --- Banda de PROGRAMACIÓN (Fase 5, sección 20) ---
+  renderBandaProgramacion();
+}
+
+/* Inserta en el Dashboard los KPIs y gráficos de programación. */
+async function renderBandaProgramacion() {
+  let p; try { p = await api('obtenerDashboardProgramacion', App.filtros); } catch (e) { return; }
+  const k = p.kpis;
+
+  const html = `
+    <div style="margin-top:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div class="view-title" style="font-size:16px">Programación de rutas</div>
+      <button class="btn" id="btn-analisis-comb">📊 Análisis programación vs 5S</button>
+    </div>
+    <div class="kpi-grid" id="kpi-prog"></div>
+    <div class="grid-2">
+      <div class="card"><h3>Programadas vs ejecutadas</h3><div class="chart-wrap"><canvas id="p-pve"></canvas></div></div>
+      <div class="card"><h3>Cumplimiento de programación por ruta</h3><div class="chart-wrap"><canvas id="p-ruta"></canvas></div></div>
+    </div>`;
+  $('#view').insertAdjacentHTML('beforeend', html);
+
+  const kps = [
+    { l: 'Cumpl. programación', v: pct(k.cumplimientoProgramacion), border: k.cumplimientoSemaforo, link: 'programacion' },
+    { l: 'Programadas', v: k.programadas },
+    { l: 'Completadas', v: k.completadas, border: 'verde' },
+    { l: 'Pendientes', v: k.pendientes, border: k.pendientes > 0 ? 'amarillo' : 'verde' },
+    { l: 'Vencidas', v: k.vencidas, border: k.vencidas > 0 ? 'rojo' : 'verde', link: 'agenda' },
+    { l: 'T. prom. ejecución', v: fmt(k.tiempoPromedioEjecucion, 0), sub: 'minutos' }
+  ];
+  const grid = $('#kpi-prog');
+  kps.forEach(kp => {
+    const card = el('div', 'kpi' + (kp.border ? ' border-' + kp.border : '') + (kp.link ? ' clickable' : ''));
+    card.innerHTML = `<div class="k-label">${kp.l}</div><div class="k-value">${kp.v}</div><div class="k-sub">${kp.sub || ''}</div>`;
+    if (kp.link) card.addEventListener('click', () => navegar(kp.link));
+    grid.appendChild(card);
+  });
+
+  // Gráfico programadas vs ejecutadas (barras agrupadas).
+  multiBarChart('p-pve', p.programadasVsEjecutadas.map(x => x.periodo), [
+    { label: 'Programadas', data: p.programadasVsEjecutadas.map(x => x.programadas) },
+    { label: 'Completadas', data: p.programadasVsEjecutadas.map(x => x.completadas) }
+  ]);
+  barChart('p-ruta', p.cumplimientoPorRuta.map(r => r.grupo),
+    p.cumplimientoPorRuta.map(r => r.cumplimiento), '% cumplimiento', true);
+
+  $('#btn-analisis-comb').addEventListener('click', abrirAnalisisCombinado);
+}
+
+/* Modal de análisis combinado: programación vs 5S (sección 19). */
+async function abrirAnalisisCombinado() {
+  const dims = [['modulo', 'Módulo'], ['area', 'Área'], ['ruta', 'Ruta'], ['responsable', 'Responsable']];
+  $('#modal-content').innerHTML = `
+    <h2>Análisis combinado</h2>
+    <p class="muted">Cumplimiento de <strong>programación</strong> (¿se hicieron?) vs cumplimiento <strong>5S</strong> (¿qué tan bien?).</p>
+    <div class="toolbar" style="margin:12px 0">
+      <label class="muted">Dimensión:
+        <select id="ac-dim" class="search-box" style="width:auto">
+          ${dims.map(d => `<option value="${d[0]}">${d[1]}</option>`).join('')}
+        </select>
+      </label>
+    </div>
+    <div class="chart-wrap" style="height:320px"><canvas id="ac-chart"></canvas></div>
+    <div class="table-wrap" style="margin-top:14px"><table id="ac-tabla"><thead><tr>
+      <th>Grupo</th><th>Cumpl. programación</th><th>Cumpl. 5S</th><th>Sesiones compl.</th><th>Criterios eval.</th>
+    </tr></thead><tbody></tbody></table></div>`;
+  $('#modal').classList.remove('hidden');
+
+  const cargar = async () => {
+    const dim = $('#ac-dim').value;
+    let r; try { r = await api('obtenerAnalisisCombinado', Object.assign({}, App.filtros, { dimension: dim })); }
+    catch (e) { return; }
+    // Scatter: X = cumplimiento programación, Y = cumplimiento 5S.
+    const puntos = r.datos.filter(x => x.cumplimientoProgramacion != null && x.cumplimiento5S != null)
+      .map(x => ({ x: x.cumplimientoProgramacion, y: x.cumplimiento5S, label: x.grupo }));
+    scatterChart('ac-chart', puntos, 'Cumpl. programación (%)', 'Cumpl. 5S (%)');
+
+    const tb = $('#ac-tabla tbody'); tb.innerHTML = '';
+    if (!r.datos.length) { tb.innerHTML = `<tr><td colspan="5">${empty('Sin datos suficientes')}</td></tr>`; return; }
+    r.datos.forEach(x => {
+      tb.insertAdjacentHTML('beforeend', `<tr>
+        <td>${x.grupo}</td><td>${pct(x.cumplimientoProgramacion)}</td><td>${pct(x.cumplimiento5S)}</td>
+        <td>${x.sesionesCompletadas}</td><td>${x.criteriosEvaluados}</td></tr>`);
+    });
+  };
+  $('#ac-dim').addEventListener('change', cargar);
+  cargar();
 }
 
 /* ============================================================
@@ -1066,6 +1153,51 @@ function multiLineChart(id, labels, series) {
     type: 'line',
     data: { labels, datasets: series.map((s, i) => ({ label: s.label, data: s.data, borderColor: PALETA[i], tension: .3, pointRadius: 3, fill: false })) },
     options: baseOpts({ plugins: { legend: { display: true } } })
+  });
+}
+
+/* Barras agrupadas (varias series). */
+function multiBarChart(id, labels, series) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: series.map((s, i) => ({
+        label: s.label, data: s.data, backgroundColor: PALETA[i % PALETA.length]
+      }))
+    },
+    options: baseOpts({ plugins: { legend: { display: true } } })
+  });
+}
+
+/* Dispersión (scatter) con etiquetas por punto. Para el análisis combinado. */
+function scatterChart(id, puntos, ejeX, ejeY) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'scatter',
+    data: {
+      datasets: [{
+        label: ejeX + ' vs ' + ejeY,
+        data: puntos,
+        backgroundColor: PALETA[1],
+        pointRadius: 7, pointHoverRadius: 9
+      }]
+    },
+    options: baseOpts({
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => `${c.raw.label}: prog ${c.raw.x}% · 5S ${c.raw.y}%`
+          }
+        }
+      },
+      scales: {
+        x: { min: 0, max: 100, title: { display: true, text: ejeX }, grid: { color: GRID_COLOR } },
+        y: { min: 0, max: 100, title: { display: true, text: ejeY }, grid: { color: GRID_COLOR } }
+      }
+    })
   });
 }
 

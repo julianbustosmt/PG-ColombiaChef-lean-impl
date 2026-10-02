@@ -290,3 +290,75 @@ function formInspeccionConfigurado() {
   });
   return { configurado: !!(urlOk && algunEntry), urlBase: cfg.URL_BASE || '' };
 }
+
+// ============================================================
+//  FASE 5 — Indicadores de programación para el Dashboard
+// ============================================================
+
+/**
+ * Datos de la sección "Programación" del Dashboard (sección 20).
+ * KPIs + gráficos (programadas vs ejecutadas, cumplimiento por ruta/módulo,
+ * pendientes por responsable, tendencia) + tabla resumen por ruta.
+ */
+function obtenerDashboardProgramacion(filtros) {
+  filtros = filtros || {};
+  var key = cacheKey('dashProg', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
+  // Las sesiones no usan el filtro global 'estado' (es de hallazgos).
+  var fs = Object.assign({}, filtros, { estado: '' });
+  var sesiones = filtrarSesiones(cargarSesiones(), fs);
+
+  var periodo = filtros.periodo || 'semana';
+
+  var res = {
+    kpis: kpisProgramacion(sesiones),
+    programadasVsEjecutadas: serieProgramadasVsEjecutadas(sesiones, periodo),
+    cumplimientoPorRuta: cumplimientoProgramacionPorGrupo(sesiones, 'ruta'),
+    cumplimientoPorModulo: cumplimientoProgramacionPorGrupo(sesiones, 'modulo'),
+    pendientesPorResponsable: pendientesPorResponsable(sesiones),
+    tendencia: serieProgramadasVsEjecutadas(sesiones, 'mes'),
+    tablaPorRuta: cumplimientoProgramacionPorGrupo(sesiones, 'ruta').map(function (r) {
+      return {
+        ruta: r.grupo,
+        programadas: r.programadas,
+        completadas: r.completadas,
+        pendientes: r.pendientes,
+        vencidas: r.vencidas,
+        cumplimiento: r.cumplimiento
+      };
+    })
+  };
+  cachePut(key, res);
+  return res;
+}
+
+/** Sesiones pendientes/vencidas agrupadas por responsable (sección 20). */
+function pendientesPorResponsable(sesiones) {
+  var pend = sesiones.filter(function (s) {
+    return s.estado === 'Programada' || s.estado === 'Pendiente' || s.estado === 'Vencida';
+  });
+  var g = agrupar(pend, 'responsable');
+  return Object.keys(g).map(function (k) {
+    return { responsable: k, pendientes: g[k].length };
+  }).sort(function (a, b) { return b.pendientes - a.pendientes; });
+}
+
+/**
+ * Análisis combinado programación vs 5S (sección 19).
+ * dimension: 'modulo' (default) | 'area' | 'responsable' | 'ruta'
+ */
+function obtenerAnalisisCombinado(filtros) {
+  filtros = filtros || {};
+  var dimension = filtros.dimension || 'modulo';
+  var fs = Object.assign({}, filtros, { estado: '' });
+
+  var sesiones = filtrarSesiones(cargarSesiones(), fs);
+  var detalle = filtrarDetalle(cargarDetalle(), filtros);
+
+  return {
+    dimension: dimension,
+    datos: analisisCombinado(sesiones, detalle, dimension)
+  };
+}
