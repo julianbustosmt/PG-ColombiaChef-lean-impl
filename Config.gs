@@ -162,7 +162,7 @@ var CONFIG = {
     // 'primary' = calendario principal de quien ejecuta/despliega la Web App.
     // Para un calendario compartido de planta, pega aquí su ID
     // (Calendar -> Configuración del calendario -> "ID de calendario").
-    CALENDAR_ID: 'primary',
+    CALENDAR_ID: 'c_b5b02458023c3e12aef3ee821b3c704f6b4f889b178c79ad0f0f91780c152b56@group.calendar.google.com',
 
     // Duración por defecto (min) si la sesión no tiene duración estimada.
     DURACION_DEFECTO_MIN: 15,
