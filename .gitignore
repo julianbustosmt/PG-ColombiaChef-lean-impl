@@ -1,0 +1,15 @@
+# Google Apps Script / clasp
+.clasp.json
+.claspignore
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log

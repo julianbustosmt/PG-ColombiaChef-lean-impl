@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title><?= appTitle ?></title>
+  <!-- Chart.js + plugin matrix (heatmaps) por CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ====================== SIDEBAR ====================== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">5S</div>
+        <div class="brand-text">
+          <strong><?= appTitle ?></strong>
+          <span><?= appSubtitle ?></span>
+        </div>
+      </div>
+      <nav class="menu">
+        <a href="javascript:void(0)" class="nav-item active" data-view="dashboard">📊 Dashboard</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="calendario">📅 Calendario</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="agenda">📌 Agenda</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="programacion">🗓️ Programación</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="cumplimiento">✅ Cumplimiento 5S</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="criterios">🔍 Criterios</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="hallazgos">⚠️ Hallazgos</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="seguimiento">📋 Seguimiento</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="estandarizacion">🏭 Estandarización</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="mapa">🗺️ Mapa 5S</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="tendencias">📈 Tendencias</a>
+        <a href="javascript:void(0)" class="nav-item" data-view="catalogos">📇 Catálogos</a>
+      </nav>
+      <div class="sidebar-foot">v<?= version ?></div>
+    </aside>
+
+    <!-- ====================== MAIN ====================== -->
+    <main class="main">
+
+      <!-- Barra de filtros globales -->
+      <header class="topbar">
+        <div class="filtros">
+          <label>Desde <input type="date" id="f-desde"></label>
+          <label>Hasta <input type="date" id="f-hasta"></label>
+          <label>Área <select id="f-area"><option value="">Todas</option></select></label>
+          <label>Módulo <select id="f-modulo"><option value="">Todos</option></select></label>
+          <label>Ruta <select id="f-ruta"><option value="">Todas</option></select></label>
+          <label>Responsable <select id="f-responsable"><option value="">Todos</option></select></label>
+          <label>Estado <select id="f-estado"><option value="">Todos</option></select></label>
+          <button id="btn-aplicar" class="btn btn-primary">Aplicar</button>
+          <button id="btn-limpiar" class="btn">🧹 Limpiar</button>
+        </div>
+        <div id="filtros-activos" class="chips"></div>
+      </header>
+
+      <!-- Contenedor dinámico de vistas -->
+      <section id="view" class="view">
+        <div class="loader">Cargando…</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal reutilizable (detalle de inspección / hallazgo) -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <button class="modal-close" id="modal-close">✕</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <?!= include('JS'); ?>
+</body>
+</html>

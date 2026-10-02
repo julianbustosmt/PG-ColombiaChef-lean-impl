@@ -1,0 +1,1183 @@
+<script>
+/* ============================================================
+   Frontend SPA — Sistema de Gestión 5S
+   Router por hash + estado de filtros + render con Chart.js
+   ============================================================ */
+
+const App = {
+  filtros: {},          // estado global de filtros
+  charts: {},           // instancias Chart.js vivas (para destruir al re-render)
+  vistaActual: 'dashboard',
+  ruta: 'dashboard',    // fuente de verdad de navegación (independiente del hash)
+  cal: {}               // { anio, mes } del mes mostrado en el calendario
+};
+
+/* ---------- Utilidades frontend ---------- */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const fmt = (v, dec = 1) => (v === null || v === undefined || v === '') ? '—' : Number(v).toFixed(dec);
+const pct = (v) => (v === null || v === undefined) ? '—' : Number(v).toFixed(1) + '%';
+
+/* Formatea una fecha ISO 'yyyy-MM-dd' a 'dd/MM/yyyy' (formato sencillo).
+   Si recibe 'yyyy-MM-dd HH:mm', conserva la hora al final. */
+function fFecha(s) {
+  if (!s) return '—';
+  const txt = String(s).trim();
+  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (!m) return txt;
+  const dmy = `${m[3]}/${m[2]}/${m[1]}`;
+  return m[4] ? `${dmy} ${m[4]}` : dmy;
+}
+
+function destruirCharts() {
+  Object.values(App.charts).forEach(c => { try { c.destroy(); } catch (e) {} });
+  App.charts = {};
+}
+
+function setLoader() { $('#view').innerHTML = '<div class="loader">Cargando…</div>'; }
+function empty(msg) { return `<div class="empty">${msg || 'Datos insuficientes'}</div>`; }
+
+/* Llamada estándar al backend con manejo de errores.
+   Acepta uno o varios argumentos: api('fn', a, b, ...). */
+function api(fn, ...args) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(reject)
+      [fn](...args);
+  });
+}
+
+/* ---------- Inicialización ---------- */
+window.addEventListener('DOMContentLoaded', async () => {
+  bindUI();
+  await cargarOpcionesFiltros();
+  routear();
+  window.addEventListener('hashchange', routear);
+});
+
+function bindUI() {
+  $('#btn-aplicar').addEventListener('click', aplicarFiltros);
+  $('#btn-limpiar').addEventListener('click', limpiarFiltros);
+  $('#modal-close').addEventListener('click', () => $('#modal').classList.add('hidden'));
+  $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('#modal').classList.add('hidden'); });
+
+  // Navegación del sidebar.
+  // En una Web App de Apps Script el contenido vive dentro de un <iframe>
+  // sandbox; un <a href="#..."> con base target="_top" intentaría navegar la
+  // ventana completa (y "sale" del iframe). Interceptamos el clic y cambiamos
+  // la vista por JS, igual que hacen las tarjetas KPI (que sí funcionan).
+  $$('.nav-item').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      navegar(a.dataset.view);
+    });
+  });
+}
+
+/* Navega a una vista. Usa el estado interno como fuente de verdad
+   (no depende de que el hash se refleje dentro del iframe sandbox).
+   Acepta 'vista' o 'vista/param' (p.ej. 'dashboard' o 'detalle/INSP-0001'). */
+function navegar(destino) {
+  if (!destino) return;
+  App.ruta = destino;
+  try { location.hash = destino; } catch (e) {} // best-effort, por si el iframe lo permite
+  routear();
+}
+
+async function cargarOpcionesFiltros() {
+  try {
+    const o = await api('obtenerOpcionesFiltros');
+    llenarSelect('#f-area', o.areas);
+    llenarSelect('#f-modulo', o.modulos);
+    llenarSelect('#f-responsable', o.responsables);
+    llenarSelect('#f-estado', o.estados);
+    const sr = $('#f-ruta');
+    o.rutas.forEach(r => sr.appendChild(new Option(r.codigo + ' · ' + r.nombre, r.codigo)));
+  } catch (e) { console.warn('No se pudieron cargar filtros', e); }
+}
+
+function llenarSelect(sel, items) {
+  const s = $(sel);
+  (items || []).forEach(v => s.appendChild(new Option(v, v)));
+}
+
+function aplicarFiltros() {
+  App.filtros = {
+    desde: $('#f-desde').value || '',
+    hasta: $('#f-hasta').value || '',
+    area: $('#f-area').value || '',
+    modulo: $('#f-modulo').value || '',
+    ruta: $('#f-ruta').value || '',
+    responsable: $('#f-responsable').value || '',
+    estado: $('#f-estado').value || ''
+  };
+  pintarChips();
+  routear();
+}
+
+function limpiarFiltros() {
+  ['#f-desde', '#f-hasta', '#f-area', '#f-modulo', '#f-ruta', '#f-responsable', '#f-estado']
+    .forEach(s => { $(s).value = ''; });
+  App.filtros = {};
+  pintarChips();
+  routear();
+}
+
+function pintarChips() {
+  const cont = $('#filtros-activos');
+  cont.innerHTML = '';
+  const etiquetas = { desde: 'Desde', hasta: 'Hasta', area: 'Área', modulo: 'Módulo', ruta: 'Ruta', responsable: 'Resp.', estado: 'Estado' };
+  Object.keys(App.filtros).forEach(k => {
+    if (App.filtros[k]) cont.appendChild(el('span', 'chip', `${etiquetas[k]}: ${App.filtros[k]}`));
+  });
+}
+
+/* ---------- Router ---------- */
+function routear() {
+  // Fuente de verdad: estado interno (App.ruta). Fallback al hash si existe.
+  const destino = App.ruta || (location.hash ? location.hash.slice(1) : '') || 'dashboard';
+  const [vista, param] = destino.split('/');
+  App.vistaActual = vista;
+  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === vista));
+  destruirCharts();
+  setLoader();
+
+  const rutas = {
+    dashboard: renderDashboard,
+    calendario: renderCalendario,
+    agenda: renderAgenda,
+    programacion: renderProgramacion,
+    catalogos: renderCatalogos,
+    cumplimiento: renderCumplimiento,
+    criterios: renderCriterios,
+    hallazgos: renderHallazgos,
+    seguimiento: renderSeguimiento,
+    estandarizacion: renderEstandarizacion,
+    mapa: renderMapa,
+    tendencias: renderTendencias
+  };
+  (rutas[vista] || renderDashboard)(param);
+}
+
+/* ============================================================
+   VISTA: DASHBOARD
+   ============================================================ */
+async function renderDashboard() {
+  let d;
+  try { d = await api('obtenerDashboard', App.filtros); }
+  catch (e) { return mostrarError(e); }
+  const k = d.kpis;
+
+  const comp = k.comparacionCumplimiento || {};
+  const compClass = comp.disponible ? (comp.direccion === 'subida' ? 'up' : 'down') : '';
+  const compTxt = comp.texto || 'Sin datos comparables';
+
+  const kpis = [
+    { l: 'Cumplimiento 5S', v: pct(k.cumplimiento), sub: compTxt, cls: compClass, border: k.cumplimientoSemaforo, link: '#cumplimiento' },
+    { l: 'Inspecciones', v: k.totalInspecciones, sub: k.inspeccionesCompletadas + ' completadas' },
+    { l: 'Hallazgos', v: k.totalHallazgos, sub: 'total registrados', link: '#hallazgos' },
+    { l: 'Abiertos', v: k.hallazgosAbiertos, sub: 'pendientes de cierre', border: k.hallazgosAbiertos > 0 ? 'amarillo' : 'verde', link: '#hallazgos' },
+    { l: 'Vencidos', v: k.hallazgosVencidos, sub: 'fuera de plazo', border: k.hallazgosVencidos > 0 ? 'rojo' : 'verde', link: '#seguimiento' },
+    { l: 'Corrección inmediata', v: pct(k.correccionInmediataPct), sub: 'de los hallazgos' },
+    { l: 'T. prom. inspección', v: fmt(k.tiempoPromedioInspeccion, 0), sub: 'minutos' },
+    { l: 'T. prom. corrección', v: fmt(k.tiempoPromedioCorreccion, 0), sub: 'minutos' },
+    { l: 'Rutas c/ seguimiento', v: pct(k.rutasSeguimientoPct), sub: 'requieren acción' },
+    { l: 'Estandarización', v: k.requierenEstandarizacion, sub: 'actividades', link: '#estandarizacion' }
+  ];
+
+  const v = $('#view');
+  v.innerHTML = `
+    <div><div class="view-title">Dashboard 5S</div>
+    <div class="view-sub">Visión general del sistema de gestión</div></div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+    <div class="grid-2">
+      <div class="card"><h3>Cumplimiento por ruta</h3><div class="chart-wrap"><canvas id="c-ruta"></canvas></div></div>
+      <div class="card"><h3>Evolución del cumplimiento (mensual)</h3><div class="chart-wrap"><canvas id="c-evol"></canvas></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Hallazgos por estado</h3><div class="chart-wrap"><canvas id="c-estado"></canvas></div></div>
+      <div class="card"><h3>Top módulos con hallazgos abiertos</h3><div class="chart-wrap"><canvas id="c-mod"></canvas></div></div>
+    </div>`;
+
+  const grid = $('#kpi-grid');
+  kpis.forEach(kp => {
+    const card = el('div', 'kpi' + (kp.border ? ' border-' + kp.border : '') + (kp.link ? ' clickable' : ''));
+    card.innerHTML = `<div class="k-label">${kp.l}</div><div class="k-value">${kp.v}</div>
+      <div class="k-sub ${kp.cls || ''}">${kp.sub || ''}</div>`;
+    if (kp.link) card.addEventListener('click', () => navegar(kp.link.replace(/^#/, '')));
+    grid.appendChild(card);
+  });
+
+  // Gráficos
+  barChart('c-ruta', d.cumplimientoPorRuta.map(r => r.codigo + ' ' + r.nombre),
+    d.cumplimientoPorRuta.map(r => r.cumplimiento), '% cumplimiento', true);
+  lineChart('c-evol', d.evolucionCumplimiento.map(p => p.periodo),
+    d.evolucionCumplimiento.map(p => p.valor), '% cumplimiento');
+  doughnutChart('c-estado', d.hallazgosPorEstado.map(x => x.etiqueta), d.hallazgosPorEstado.map(x => x.valor));
+  barChart('c-mod', d.topModulosProblema.map(x => x.modulo), d.topModulosProblema.map(x => x.abiertos), 'Abiertos');
+}
+
+/* ============================================================
+   VISTA: CUMPLIMIENTO 5S
+   ============================================================ */
+async function renderCumplimiento() {
+  let d; try { d = await api('obtenerCumplimiento', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Cumplimiento 5S</div>
+    <div class="view-sub">Cumplimiento general: <strong>${pct(d.general)}</strong></div></div>
+    <div class="grid-2">
+      <div class="card"><h3>Por ruta</h3><div class="chart-wrap"><canvas id="cc-ruta"></canvas></div></div>
+      <div class="card"><h3>Radar por ruta</h3><div class="chart-wrap"><canvas id="cc-radar"></canvas></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Por módulo</h3><div class="chart-wrap"><canvas id="cc-mod"></canvas></div></div>
+      <div class="card"><h3>Por área</h3><div class="chart-wrap"><canvas id="cc-area"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Evolución del cumplimiento</h3><div class="chart-wrap"><canvas id="cc-evol"></canvas></div></div>`;
+
+  if (!d.porRuta.length) return $('#view').insertAdjacentHTML('beforeend', empty());
+  barChart('cc-ruta', d.porRuta.map(r => r.codigo), d.porRuta.map(r => r.cumplimiento), '%', true);
+  radarChart('cc-radar', d.radarRutas.map(r => r.eje), d.radarRutas.map(r => r.valor));
+  barChart('cc-mod', d.porModulo.map(r => r.grupo), d.porModulo.map(r => r.cumplimiento), '%', true);
+  barChart('cc-area', d.porArea.map(r => r.grupo), d.porArea.map(r => r.cumplimiento), '%', true);
+  lineChart('cc-evol', d.evolucion.map(p => p.periodo), d.evolucion.map(p => p.valor), '%');
+}
+
+/* ============================================================
+   VISTA: CRITERIOS
+   ============================================================ */
+async function renderCriterios() {
+  let d; try { d = await api('obtenerCumplimientoPorCriterio', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Análisis de Criterios</div>
+    <div class="view-sub">Identifica qué estándares presentan mayor incumplimiento</div></div>
+    <div class="card"><h3>Criterios con menor cumplimiento</h3>
+      <div class="chart-wrap" style="height:${Math.max(280, d.ranking.length * 26)}px"><canvas id="cr-rank"></canvas></div></div>
+    <div class="card"><h3>Detalle por criterio</h3>
+      <div class="table-wrap"><table id="cr-tabla"><thead><tr>
+        <th>Ruta</th><th>Criterio</th><th>% Cumpl.</th><th>No cumple</th><th>Parcial</th><th>Evaluaciones</th>
+      </tr></thead><tbody></tbody></table></div></div>`;
+
+  if (!d.ranking.length) { $('#view').insertAdjacentHTML('beforeend', empty()); return; }
+  const top = d.ranking.slice(0, 15);
+  barChart('cr-rank', top.map(c => c.codigoCriterio + ' · ' + recortar(c.nombreCriterio, 40)),
+    top.map(c => c.cumplimiento), '% cumplimiento', true, 'y');
+
+  const tb = $('#cr-tabla tbody');
+  d.ranking.forEach(c => {
+    const tr = el('tr');
+    tr.innerHTML = `<td>${c.codigoRuta}</td><td title="${c.nombreCriterio}">${recortar(c.nombreCriterio, 55)}</td>
+      <td>${pct(c.cumplimiento)}</td><td>${c.noCumple}</td><td>${c.parcial}</td><td>${c.evaluaciones}</td>`;
+    tb.appendChild(tr);
+  });
+  habilitarOrden('cr-tabla');
+}
+
+/* ============================================================
+   VISTA: HALLAZGOS
+   ============================================================ */
+async function renderHallazgos() {
+  let d; try { d = await api('obtenerHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
+  const k = d.kpis;
+  $('#view').innerHTML = `
+    <div><div class="view-title">Gestión de Hallazgos</div></div>
+    <div class="kpi-grid">
+      ${miniKpi('Total', k.total)}${miniKpi('Abiertos', k.abiertos, 'amarillo')}
+      ${miniKpi('Corregidos', k.corregidos, 'verde')}${miniKpi('Vencidos', k.vencidos, 'rojo')}
+      ${miniKpi('En seguimiento', k.enSeguimiento)}${miniKpi('Corrección inmediata', pct(k.correccionInmediataPct))}
+      ${miniKpi('Pend. otra área', k.pendientesOtraArea)}
+    </div>
+    <div class="grid-3">
+      <div class="card"><h3>Por módulo</h3><div class="chart-wrap"><canvas id="h-mod"></canvas></div></div>
+      <div class="card"><h3>Por tipo</h3><div class="chart-wrap"><canvas id="h-tipo"></canvas></div></div>
+      <div class="card"><h3>Por 5S</h3><div class="chart-wrap"><canvas id="h-5s"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">Detalle de hallazgos</h3>
+        <input class="search-box" id="h-buscar" placeholder="Buscar…">
+      </div>
+      <div class="table-wrap"><table id="h-tabla"><thead><tr>
+        <th>ID</th><th>Fecha</th><th>Módulo</th><th>Ruta</th><th>Tipo</th><th>Descripción</th>
+        <th>5S</th><th>Responsable</th><th>F. límite</th><th>Estado</th><th>Días</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>`;
+
+  barChart('h-mod', d.porModulo.map(x => x.etiqueta), d.porModulo.map(x => x.valor), 'Hallazgos');
+  doughnutChart('h-tipo', d.porTipo.map(x => x.etiqueta), d.porTipo.map(x => x.valor));
+  doughnutChart('h-5s', d.por5S.map(x => x.etiqueta), d.por5S.map(x => x.valor));
+
+  renderTablaHallazgos(d.tabla);
+  $('#h-buscar').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    renderTablaHallazgos(d.tabla.filter(h =>
+      JSON.stringify(h).toLowerCase().includes(q)));
+  });
+}
+
+function renderTablaHallazgos(filas) {
+  const tb = $('#h-tabla tbody');
+  tb.innerHTML = '';
+  if (!filas.length) { tb.innerHTML = `<tr><td colspan="11">${empty('Sin hallazgos')}</td></tr>`; return; }
+  filas.forEach(h => {
+    const tr = el('tr', 'row-click');
+    const est = (h.estado || '').split(' ')[0];
+    tr.innerHTML = `<td>${h.idHallazgo}</td><td>${h.fecha || '—'}</td><td>${h.modulo || '—'}</td>
+      <td>${h.ruta || '—'}</td><td>${h.tipo || '—'}</td><td title="${h.descripcion}">${recortar(h.descripcion, 45)}</td>
+      <td>${recortar(h.cincoS, 18)}</td><td>${h.responsable || '—'}</td><td>${h.fechaLimite || '—'}</td>
+      <td><span class="badge ${est}">${h.estado || '—'}</span></td><td>${h.diasAbiertos ?? '—'}</td>`;
+    tr.addEventListener('click', () => h.ruta ? abrirDetalleInspeccion(h.ruta) : abrirDetalleHallazgo(h));
+    tb.appendChild(tr);
+  });
+  habilitarOrden('h-tabla');
+}
+
+/* ============================================================
+   VISTA: SEGUIMIENTO
+   ============================================================ */
+async function renderSeguimiento() {
+  let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { return mostrarError(e); }
+  const r = d.resumen;
+  $('#view').innerHTML = `
+    <div><div class="view-title">Seguimiento de Acciones</div></div>
+    <div class="kpi-grid">
+      ${miniKpi('Pendientes', r.pendientes)}${miniKpi('Vencidas', r.vencidas, 'rojo')}
+      ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}${miniKpi('Cerradas', r.cerradas, 'verde')}
+    </div>
+    <div class="card"><h3>Acciones</h3>
+      <div class="table-wrap"><table id="s-tabla"><thead><tr>
+        <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
+        <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
+      </tr></thead><tbody></tbody></table></div></div>`;
+
+  const tb = $('#s-tabla tbody');
+  if (!d.acciones.length) { tb.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
+  d.acciones.sort((a, b) => orden(b.semaforo) - orden(a.semaforo));
+  d.acciones.forEach(a => {
+    const tr = el('tr');
+    const est = (a.estado || '').split(' ')[0];
+    tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
+      <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
+      <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
+      <td>${a.fechaLimite || '—'}</td><td><span class="badge ${est}">${a.estado}</span></td>
+      <td>${a.diasAbiertos ?? '—'}</td>`;
+    tb.appendChild(tr);
+  });
+  habilitarOrden('s-tabla');
+}
+function orden(s){return {rojo:3,amarillo:2,gris:1,verde:0}[s]||0;}
+
+/* ============================================================
+   VISTA: ESTANDARIZACIÓN
+   ============================================================ */
+async function renderEstandarizacion() {
+  let d; try { d = await api('obtenerActividadesEstandarizacion', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Análisis de Actividades y Estandarización</div>
+    <div class="view-sub">Conecta el sistema 5S con Ingeniería Industrial</div></div>
+    <div class="kpi-grid">
+      ${miniKpi('Requieren medición', d.totalRequierenMedicion)}
+      ${miniKpi('Recurrentes', d.recurrentes, 'amarillo')}
+      ${miniKpi('No recurrentes', d.noRecurrentes)}
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Por tipo de intervención</h3><div class="chart-wrap"><canvas id="e-interv"></canvas></div></div>
+      <div class="card"><h3>Tiempo promedio por tipo (min)</h3><div class="chart-wrap"><canvas id="e-tiempo"></canvas></div></div>
+    </div>
+    <div class="card"><h3>Top problemas recurrentes</h3>
+      <div class="table-wrap"><table><thead><tr>
+        <th>Ocurrencias</th><th>Tipo</th><th>5S</th><th>Módulo</th><th>Ejemplo</th>
+      </tr></thead><tbody id="e-rec"></tbody></table></div></div>`;
+
+  doughnutChart('e-interv', d.porTipoIntervencion.map(x => x.etiqueta), d.porTipoIntervencion.map(x => x.valor));
+  barChart('e-tiempo', d.tiempoPorTipo.map(x => x.tipo), d.tiempoPorTipo.map(x => x.promedioMin), 'min');
+  const tb = $('#e-rec');
+  if (!d.topRecurrentes.length) { tb.innerHTML = `<tr><td colspan="5">${empty('Sin recurrencias detectadas')}</td></tr>`; }
+  d.topRecurrentes.forEach(r => {
+    tb.insertAdjacentHTML('beforeend',
+      `<tr><td><strong>${r.ocurrencias}</strong></td><td>${r.tipo || '—'}</td><td>${recortar(r.cincoS, 16)}</td>
+       <td>${r.modulo || '—'}</td><td title="${r.ejemplo}">${recortar(r.ejemplo, 50)}</td></tr>`);
+  });
+}
+
+/* ============================================================
+   VISTA: MAPA 5S
+   ============================================================ */
+async function renderMapa() {
+  let d; try { d = await api('obtenerMapa5S', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Mapa 5S de la Planta</div>
+    <div class="view-sub">Estado por módulo — clic para ver detalle</div></div>
+    <div class="mapa-grid" id="mapa-grid"></div>`;
+  const grid = $('#mapa-grid');
+  if (!d.length) { grid.innerHTML = empty('Sin módulos con datos'); return; }
+  d.forEach(m => {
+    const c = el('div', 'mod-card ' + m.semaforo);
+    c.innerHTML = `<div class="m-name">${m.modulo}</div>
+      <div class="m-cumpl">${pct(m.cumplimiento)}</div>
+      <div class="m-row"><span>Hallazgos abiertos</span><strong>${m.hallazgosAbiertos}</strong></div>
+      <div class="m-row"><span>Vencidos</span><strong>${m.hallazgosVencidos}</strong></div>`;
+    c.addEventListener('click', () => { $('#f-modulo').value = m.modulo; App.filtros.modulo = m.modulo; pintarChips(); navegar('cumplimiento'); });
+    grid.appendChild(c);
+  });
+}
+
+/* ============================================================
+   VISTA: TENDENCIAS
+   ============================================================ */
+async function renderTendencias() {
+  const periodo = App.filtros.periodo || 'mes';
+  let d; try { d = await api('obtenerTendencias', Object.assign({}, App.filtros, { periodo })); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Tendencias</div>
+    <div class="view-sub">¿La implementación de 5S está mejorando con el tiempo?</div></div>
+    <div class="toolbar">
+      <label class="muted">Periodo:
+        <select id="t-periodo" class="search-box" style="width:auto">
+          <option value="dia">Día</option><option value="semana">Semana</option>
+          <option value="mes" selected>Mes</option>
+        </select></label>
+    </div>
+    <div class="card"><h3>Cumplimiento 5S</h3><div class="chart-wrap"><canvas id="t-cumpl"></canvas></div></div>
+    <div class="grid-2">
+      <div class="card"><h3>Inspecciones</h3><div class="chart-wrap"><canvas id="t-insp"></canvas></div></div>
+      <div class="card"><h3>Hallazgos generados vs cerrados</h3><div class="chart-wrap"><canvas id="t-hall"></canvas></div></div>
+    </div>`;
+  $('#t-periodo').value = periodo;
+  $('#t-periodo').addEventListener('change', (e) => { App.filtros.periodo = e.target.value; renderTendencias(); });
+
+  lineChart('t-cumpl', d.cumplimiento.map(p => p.periodo), d.cumplimiento.map(p => p.valor), '% cumplimiento');
+  lineChart('t-insp', d.inspecciones.map(p => p.periodo), d.inspecciones.map(p => p.valor), 'Inspecciones');
+  multiLineChart('t-hall',
+    d.hallazgosGenerados.map(p => p.periodo),
+    [{ label: 'Generados', data: d.hallazgosGenerados.map(p => p.valor) },
+     { label: 'Cerrados', data: d.hallazgosCerrados.map(p => p.valor) }]);
+}
+
+/* ============================================================
+   VISTA: PROGRAMACIÓN (Fase 1)
+   ============================================================ */
+async function renderProgramacion() {
+  let d; try { d = await api('obtenerProgramaciones', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div><div class="view-title">Programación de Rutas 5S</div>
+      <div class="view-sub">Reglas de periodicidad que generan las sesiones de inspección</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="btn-regenerar">↻ Generar sesiones</button>
+        <button class="btn btn-primary" id="btn-nueva-prog">+ Nueva programación</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between">
+        <h3 style="margin:0">Programaciones activas</h3>
+        <input class="search-box" id="prog-buscar" placeholder="Buscar…" style="width:220px">
+      </div>
+      <div class="table-wrap"><table id="prog-tabla"><thead><tr>
+        <th>ID</th><th>Ruta</th><th>Área</th><th>Módulo</th><th>Responsable</th>
+        <th>Frecuencia</th><th>Hora</th><th>Próxima sesión</th><th>Estado</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div id="prog-pager"></div>
+    </div>`;
+
+  const filaProg = (p) => {
+    const est = p.estado === 'Activa' ? 'verde' : (p.estado === 'Pausada' ? 'amarillo' : 'gris');
+    return `<tr>
+      <td>${p.id}</td><td>${p.ruta} · ${recortar(p.nombreRuta, 20)}</td><td>${p.area || '—'}</td>
+      <td>${p.modulo || '—'}</td><td>${p.responsable || '—'}</td>
+      <td>${p.frecuencia}${p.diasSemana ? ' (' + p.diasSemana + ')' : ''}</td>
+      <td>${p.hora || '—'}</td><td>${fFecha(p.proximaSesion)}</td>
+      <td><span class="badge ${est}">${p.estado}</span></td></tr>`;
+  };
+
+  // Paginación con tamaño configurable (componente reutilizable).
+  const pager = crearPaginador({
+    datos: d.programaciones,
+    tbodySel: '#prog-tabla tbody',
+    pagerSel: '#prog-pager',
+    tablaId: 'prog-tabla',
+    colspan: 9,
+    renderFila: filaProg,
+    vacioMsg: 'Aún no hay programaciones. Crea la primera con “+ Nueva programación”.'
+  });
+
+  // Búsqueda que filtra sobre el dataset y repagina.
+  $('#prog-buscar').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    pager.setDatos(d.programaciones.filter(p =>
+      JSON.stringify(p).toLowerCase().includes(q)));
+  });
+
+  $('#btn-nueva-prog').addEventListener('click', abrirFormProgramacion);
+  $('#btn-regenerar').addEventListener('click', async () => {
+    $('#btn-regenerar').disabled = true;
+    $('#btn-regenerar').textContent = 'Generando…';
+    try {
+      const r = await api('regenerarSesiones');
+      alert(`Listo. Sesiones nuevas: ${r.creadas}. Marcadas vencidas: ${r.vencidas}.`);
+      renderProgramacion();
+    } catch (e) { mostrarError(e); }
+  });
+}
+
+/* Formulario modal de nueva programación. */
+async function abrirFormProgramacion() {
+  let o; try { o = await api('obtenerOpcionesProgramacion'); } catch (e) { return mostrarError(e); }
+
+  const checksRutas = o.rutas.map(r =>
+    `<label style="display:block;margin:3px 0"><input type="checkbox" class="pf-ruta" value="${r.codigo}"> ${r.codigo} — ${r.nombre}</label>`).join('');
+  const optTipos = o.tipos.map(t => `<option value="${t}">${t}</option>`).join('');
+  const checksDias = o.diasSemana.map(dd =>
+    `<label style="margin-right:10px"><input type="checkbox" class="pf-dia" value="${dd}"> ${dd}</label>`).join('');
+  const sel = (id, items) => `<select id="${id}" class="search-box" style="width:100%">
+      <option value="">— seleccionar —</option>${items.map(x => `<option>${x}</option>`).join('')}</select>`;
+  // Responsables vienen como {nombre, correo}; el value es el nombre y el
+  // correo se guarda en data-correo (útil para mostrarlo/validar en el futuro).
+  const selResp = (id, items) => `<select id="${id}" class="search-box" style="width:100%">
+      <option value="">— seleccionar —</option>${items.map(x =>
+        `<option value="${x.nombre}" data-correo="${x.correo || ''}">${x.nombre}${x.correo ? ' · ' + x.correo : ''}</option>`).join('')}</select>`;
+
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  $('#modal-content').innerHTML = `
+    <h2>Nueva programación</h2>
+    <p class="muted" style="margin-bottom:14px">Elige una o varias rutas y define la periodicidad.</p>
+    <div class="grid-2" style="gap:18px">
+      <div>
+        <h3>Rutas</h3>${checksRutas}
+        <label style="display:block;margin-top:8px;padding:8px;background:var(--panel-2);border-radius:7px">
+          <input type="checkbox" id="pf-agrupar">
+          <strong>Agrupar rutas en una sola sesión</strong>
+          <div class="muted" style="font-size:11px;margin-top:3px">
+            Marca esto si la misma persona hará todas las rutas seleccionadas al tiempo.
+            Si lo dejas sin marcar, se crea una programación por cada ruta.
+          </div>
+        </label>
+        <h3 style="margin-top:14px">Área</h3>${sel('pf-area', o.areas)}
+        <h3 style="margin-top:10px">Módulo</h3>${sel('pf-modulo', o.modulos)}
+        <h3 style="margin-top:10px">Responsable</h3>${selResp('pf-responsable', o.responsables)}
+        <p class="muted" style="font-size:11px;margin-top:6px">
+          ¿Falta un área, módulo o responsable? Agrégalo en
+          <a href="javascript:void(0)" id="pf-ir-catalogos" style="color:#64b5f6">Catálogos</a>.
+        </p>
+      </div>
+      <div>
+        <h3>Tipo de programación</h3>
+        <select id="pf-tipo" class="search-box" style="width:100%">${optTipos}</select>
+
+        <div id="pf-dias-wrap" style="margin-top:10px;display:none">
+          <h3>Días de la semana</h3>${checksDias}
+        </div>
+        <div id="pf-diames-wrap" style="margin-top:10px;display:none">
+          <h3>Día del mes</h3>
+          <input type="number" id="pf-diames" min="1" max="31" class="search-box" style="width:100px" value="1">
+        </div>
+
+        <h3 style="margin-top:10px">Hora de inicio</h3>
+        <input type="time" id="pf-hora" class="search-box" value="08:00">
+        <h3 style="margin-top:10px">Duración estimada (min)</h3>
+        <input type="number" id="pf-duracion" class="search-box" style="width:120px" value="15" min="1">
+
+        <div class="grid-2" style="margin-top:10px">
+          <div><h3>Fecha inicio</h3><input type="date" id="pf-ini" class="search-box" value="${hoy}"></div>
+          <div><h3>Fecha fin</h3><input type="date" id="pf-fin" class="search-box"></div>
+        </div>
+
+        <h3 style="margin-top:10px">Observaciones</h3>
+        <input type="text" id="pf-obs" class="search-box" style="width:100%" placeholder="Opcional">
+        <label style="display:block;margin-top:12px">
+          <input type="checkbox" id="pf-cal"> Sincronizar con Google Calendar (próxima fase)
+        </label>
+      </div>
+    </div>
+    <div id="pf-error" style="color:#ef9a9a;margin-top:12px"></div>
+    <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn" id="pf-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="pf-guardar">Crear programación</button>
+    </div>`;
+  $('#modal').classList.remove('hidden');
+
+  // Mostrar/ocultar campos según el tipo.
+  const toggleTipo = () => {
+    const t = $('#pf-tipo').value;
+    $('#pf-dias-wrap').style.display = (t === 'Semanal') ? 'block' : 'none';
+    $('#pf-diames-wrap').style.display = (t === 'Mensual') ? 'block' : 'none';
+  };
+  $('#pf-tipo').addEventListener('change', toggleTipo); toggleTipo();
+
+  $('#pf-cancelar').addEventListener('click', () => $('#modal').classList.add('hidden'));
+  $('#pf-guardar').addEventListener('click', guardarProgramacionDesdeForm);
+  $('#pf-ir-catalogos').addEventListener('click', () => { $('#modal').classList.add('hidden'); navegar('catalogos'); });
+}
+
+async function guardarProgramacionDesdeForm() {
+  const rutas = Array.from($$('.pf-ruta')).filter(c => c.checked).map(c => c.value);
+  const tipo = $('#pf-tipo').value;
+  const err = $('#pf-error');
+  err.textContent = '';
+
+  if (!rutas.length) { err.textContent = 'Selecciona al menos una ruta.'; return; }
+  if (tipo === 'Semanal' && !$$('.pf-dia:checked').length) {
+    err.textContent = 'Para frecuencia semanal, elige al menos un día.'; return;
+  }
+
+  const datos = {
+    rutas,
+    agruparRutas: $('#pf-agrupar').checked,
+    area: $('#pf-area').value,
+    modulo: $('#pf-modulo').value,
+    responsable: $('#pf-responsable').value,
+    tipo,
+    diasSemana: Array.from($$('.pf-dia')).filter(c => c.checked).map(c => c.value),
+    diaMes: Number($('#pf-diames').value) || null,
+    hora: $('#pf-hora').value,
+    duracion: Number($('#pf-duracion').value) || null,
+    fechaInicio: $('#pf-ini').value,
+    fechaFin: $('#pf-fin').value,
+    observaciones: $('#pf-obs').value,
+    calendarActivo: $('#pf-cal').checked
+  };
+
+  const btn = $('#pf-guardar');
+  btn.disabled = true; btn.textContent = 'Creando…';
+  try {
+    const r = await api('guardarProgramacion', datos);
+    if (!r.ok) { err.textContent = r.error || 'No se pudo crear.'; btn.disabled = false; btn.textContent = 'Crear programación'; return; }
+    $('#modal').classList.add('hidden');
+    alert(`Programación creada (${r.ids.length}). Sesiones generadas: ${r.sesionesCreadas}.`);
+    renderProgramacion();
+  } catch (e) {
+    err.textContent = (e && e.message) || String(e);
+    btn.disabled = false; btn.textContent = 'Crear programación';
+  }
+}
+
+/* ============================================================
+   VISTA: CALENDARIO (Fase 2)
+   ============================================================ */
+async function renderCalendario() {
+  const filtros = Object.assign({}, App.filtros, App.cal);
+  let d; try { d = await api('obtenerCalendario', filtros); } catch (e) { return mostrarError(e); }
+  App.cal = { anio: d.periodo.anio, mes: d.periodo.mes };
+
+  const dow = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  $('#view').innerHTML = `
+    <div class="cal-header">
+      <div><div class="view-title">Calendario de Rutas 5S</div>
+      <div class="view-sub">${d.total} sesión(es) este mes</div></div>
+      <div class="cal-nav">
+        <button class="btn" id="cal-prev">◀</button>
+        <div class="cal-mes">${d.periodo.nombreMes}</div>
+        <button class="btn" id="cal-next">▶</button>
+        <button class="btn" id="cal-hoy">Hoy</button>
+      </div>
+    </div>
+    <div class="cal-grid">${dow.map(x => `<div class="cal-dow">${x}</div>`).join('')}</div>
+    <div class="cal-grid" id="cal-body"></div>
+    <div class="cal-leyenda">
+      <span><i class="leg-dot" style="background:#1565c0"></i>Programada</span>
+      <span><i class="leg-dot" style="background:#f9a825"></i>Pendiente</span>
+      <span><i class="leg-dot" style="background:#2e7d32"></i>Completada</span>
+      <span><i class="leg-dot" style="background:#c62828"></i>Vencida</span>
+      <span><i class="leg-dot" style="background:#6a1b9a"></i>Reprogramada</span>
+      <span><i class="leg-dot" style="background:#546e7a"></i>Cancelada</span>
+    </div>`;
+
+  const body = $('#cal-body');
+  // Celdas vacías antes del día 1.
+  for (let i = 0; i < d.periodo.primerDiaSemana; i++) body.appendChild(el('div', 'cal-cell vacia'));
+
+  for (let dia = 1; dia <= d.periodo.diasEnMes; dia++) {
+    const fecha = `${d.periodo.anio}-${String(d.periodo.mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+    const esHoy = fecha === d.periodo.hoyISO;
+    const cell = el('div', 'cal-cell' + (esHoy ? ' hoy' : ''));
+    cell.appendChild(el('div', 'cal-num', String(dia)));
+    const evs = d.sesionesPorDia[fecha] || [];
+    evs.slice(0, 3).forEach(s => {
+      const ev = el('div', 'cal-ev ' + s.semaforo,
+        `${s.horaInicioProg || ''} ${s.ruta} · ${recortar(s.modulo, 10)}`);
+      ev.title = `${s.ruta} ${s.nombreRuta} — ${s.responsable || ''} (${s.estado})`;
+      ev.addEventListener('click', () => abrirDetalleSesion(s.id));
+      cell.appendChild(ev);
+    });
+    if (evs.length > 3) {
+      const mas = el('div', 'cal-mas', `+${evs.length - 3} más`);
+      mas.addEventListener('click', () => abrirListaDiaSesiones(fecha, evs));
+      cell.appendChild(mas);
+    }
+    body.appendChild(cell);
+  }
+
+  $('#cal-prev').addEventListener('click', () => { App.cal = d.prev; renderCalendario(); });
+  $('#cal-next').addEventListener('click', () => { App.cal = d.next; renderCalendario(); });
+  $('#cal-hoy').addEventListener('click', () => { App.cal = {}; renderCalendario(); });
+}
+
+/* Modal con la lista de sesiones de un día (cuando hay más de 3). */
+function abrirListaDiaSesiones(fecha, sesiones) {
+  const items = sesiones.map(s =>
+    `<div class="agenda-item ${s.semaforo}" data-ses="${s.id}">
+       <div class="agenda-hora">${s.horaInicioProg || '—'}</div>
+       <div class="agenda-info"><div class="a-ruta">${s.ruta} · ${s.nombreRuta}</div>
+       <div class="a-meta">${s.modulo || ''} · ${s.responsable || ''} · ${s.estado}</div></div>
+     </div>`).join('');
+  $('#modal-content').innerHTML = `<h2>Sesiones del ${fFecha(fecha)}</h2><div style="margin-top:14px">${items}</div>`;
+  $('#modal').classList.remove('hidden');
+  $$('#modal-content [data-ses]').forEach(it =>
+    it.addEventListener('click', () => abrirDetalleSesion(it.dataset.ses)));
+}
+
+/* ============================================================
+   VISTA: AGENDA (Fase 2)
+   ============================================================ */
+async function renderAgenda() {
+  let d; try { d = await api('obtenerAgenda', App.filtros); } catch (e) { return mostrarError(e); }
+  $('#view').innerHTML = `
+    <div><div class="view-title">Agenda</div>
+    <div class="view-sub">Próximas sesiones pendientes de ejecutar (${d.total})</div></div>
+    <div id="agenda-body"></div>`;
+
+  const body = $('#agenda-body');
+  if (!d.dias.length) { body.innerHTML = empty('No hay sesiones próximas. Crea una programación para generarlas.'); return; }
+
+  d.dias.forEach(dia => {
+    const bloque = el('div', 'agenda-dia');
+    bloque.appendChild(el('div', 'agenda-fecha', `${dia.etiqueta} · ${fFecha(dia.fecha)}`));
+    dia.sesiones.forEach(s => {
+      const it = el('div', 'agenda-item ' + s.semaforo);
+      it.innerHTML = `
+        <div class="agenda-hora">${s.horaInicioProg || '—'}</div>
+        <div class="agenda-info">
+          <div class="a-ruta">${s.ruta} — ${s.nombreRuta}</div>
+          <div class="a-meta">${s.modulo || ''} ${s.area ? '· ' + s.area : ''} · ${s.responsable || 'sin responsable'} · <span class="badge ${s.semaforo}">${s.estado}</span></div>
+        </div>`;
+      it.addEventListener('click', () => abrirDetalleSesion(s.id));
+      bloque.appendChild(it);
+    });
+    body.appendChild(bloque);
+  });
+}
+
+/* ============================================================
+   MODAL: detalle de una sesión
+   ============================================================ */
+async function abrirDetalleSesion(idSesion) {
+  let d; try { d = await api('obtenerDetalleSesion', idSesion); } catch (e) { return mostrarError(e); }
+  if (!d.ok) { alert(d.error || 'No se encontró la sesión.'); return; }
+  const s = d.sesion;
+
+  const puedeIniciar = (s.estado === 'Programada' || s.estado === 'Pendiente' || s.estado === 'Reprogramada');
+  const enCurso = (s.estado === 'En curso');
+  const finalizada = (s.estado === 'Completada' || s.estado === 'Cancelada');
+
+  $('#modal-content').innerHTML = `
+    <h2>${s.ruta} — ${s.nombreRuta}</h2>
+    <p style="margin:4px 0 14px"><span class="badge ${s.semaforo}">${s.estado}</span>
+       ${s.idInspeccion ? ' · Inspección: <strong>' + s.idInspeccion + '</strong>' : ''}</p>
+    <div class="grid-2">
+      <div>${campo('Fecha', fFecha(s.fecha))}${campo('Hora', s.horaInicioProg)}
+           ${campo('Duración estimada (min)', s.duracionEstimada)}${campo('ID sesión', s.id)}</div>
+      <div>${campo('Área', s.area)}${campo('Módulo', s.modulo)}
+           ${campo('Responsable', s.responsable)}${campo('Correo', s.correoResponsable)}</div>
+    </div>
+    <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+      ${puedeIniciar ? '<button class="btn btn-primary" id="ses-iniciar">▶ Iniciar inspección</button>' : ''}
+      ${enCurso ? '<button class="btn btn-primary" id="ses-finalizar">✔ Finalizar y vincular</button>' : ''}
+      <button class="btn" id="ses-reprog" ${finalizada ? 'disabled' : ''}>🔁 Reprogramar</button>
+      <button class="btn" id="ses-cancel" ${finalizada ? 'disabled' : ''}>✖ Cancelar</button>
+    </div>
+    <div id="ses-msg" class="muted" style="font-size:12px;margin-top:12px"></div>`;
+  $('#modal').classList.remove('hidden');
+
+  const btnIniciar = $('#ses-iniciar');
+  if (btnIniciar) btnIniciar.addEventListener('click', () => accionIniciarSesion(s));
+
+  const btnFin = $('#ses-finalizar');
+  if (btnFin) btnFin.addEventListener('click', () => accionFinalizarSesion(s));
+
+  $('#ses-reprog').addEventListener('click', () => accionReprogramarSesion(s));
+  $('#ses-cancel').addEventListener('click', () => accionCancelarSesion(s));
+}
+
+/* ---- Acciones de ejecución (Fase 3) ---- */
+
+async function accionIniciarSesion(s) {
+  const msg = $('#ses-msg');
+  msg.innerHTML = 'Iniciando sesión…';
+  try {
+    const r = await api('apiIniciarSesion', s.id);
+    if (!r.ok) { msg.innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; }
+
+    if (r.urlFormulario && r.urlFormulario.indexOf('XXXX') === -1) {
+      // Abre el Form prellenado en pestaña nueva.
+      window.open(r.urlFormulario, '_blank');
+      msg.innerHTML = `✅ Sesión <strong>En curso</strong>. Se abrió el formulario prellenado.
+        Cuando el inspector lo envíe, vuelve y pulsa <strong>“Finalizar y vincular”</strong>.`;
+    } else {
+      msg.innerHTML = `✅ Sesión marcada <strong>En curso</strong>.
+        <span style="color:#ffd54f">⚠️ El formulario aún no está configurado</span>
+        (ver <code>CONFIG.FORM_INSPECCION</code>). Abre tu Form manualmente por ahora.`;
+    }
+    // Refresca el detalle para mostrar el botón "Finalizar".
+    setTimeout(() => abrirDetalleSesion(s.id), 1200);
+  } catch (e) { msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`; }
+}
+
+async function accionFinalizarSesion(s) {
+  const idInsp = prompt(
+    'ID de la inspección a vincular (ej. INSP-0007).\n' +
+    'Déjalo vacío para que el sistema intente detectarla automáticamente:', '');
+  if (idInsp === null) return; // canceló
+  const msg = $('#ses-msg');
+  msg.innerHTML = 'Finalizando…';
+  try {
+    const r = await api('apiFinalizarSesion', s.id, idInsp.trim());
+    if (!r.ok) { msg.innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; }
+    msg.innerHTML = r.idInspeccion
+      ? `✅ Sesión <strong>Completada</strong> y vinculada a <strong>${r.idInspeccion}</strong>${r.duracion != null ? ' · ' + r.duracion + ' min' : ''}.`
+      : `✅ Sesión <strong>Completada</strong>. ⚠️ No se detectó inspección; puedes vincularla luego indicando el ID.`;
+    cerrarModalYRefrescar();
+  } catch (e) { msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`; }
+}
+
+async function accionReprogramarSesion(s) {
+  const nuevaFecha = prompt('Nueva fecha (formato AAAA-MM-DD):', s.fecha);
+  if (!nuevaFecha) return;
+  const nuevaHora = prompt('Nueva hora (HH:mm):', s.horaInicioProg || '08:00');
+  const motivo = prompt('Motivo de la reprogramación:', '') || '';
+  try {
+    const r = await api('apiReprogramarSesion', s.id, { nuevaFecha, nuevaHora, motivo });
+    if (!r.ok) { alert(r.error); return; }
+    cerrarModalYRefrescar();
+  } catch (e) { alert((e && e.message) || e); }
+}
+
+async function accionCancelarSesion(s) {
+  if (!confirm('¿Está seguro de cancelar esta sesión?')) return;
+  const motivo = prompt('Motivo de la cancelación:', '') || '';
+  try {
+    const r = await api('apiCancelarSesion', s.id, motivo);
+    if (!r.ok) { alert(r.error); return; }
+    cerrarModalYRefrescar();
+  } catch (e) { alert((e && e.message) || e); }
+}
+
+/* Cierra el modal y refresca la vista actual (calendario/agenda/etc.). */
+function cerrarModalYRefrescar() {
+  $('#modal').classList.add('hidden');
+  routear();
+}
+
+/* ============================================================
+   VISTA: CATÁLOGOS MAESTROS (administración)
+   ============================================================ */
+async function renderCatalogos() {
+  let d; try { d = await api('obtenerCatalogosAdmin'); } catch (e) { return mostrarError(e); }
+
+  $('#view').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div><div class="view-title">Catálogos Maestros</div>
+      <div class="view-sub">Áreas, módulos y responsables disponibles para planificar</div></div>
+      <button class="btn btn-primary" id="btn-nueva-cat">+ Nueva entrada</button>
+    </div>
+    <div class="grid-3">
+      <div class="card"><h3>Áreas</h3><div id="cat-Area"></div></div>
+      <div class="card"><h3>Módulos</h3><div id="cat-Modulo"></div></div>
+      <div class="card"><h3>Responsables</h3><div id="cat-Responsable"></div></div>
+    </div>`;
+
+  const porTipo = { Area: [], Modulo: [], Responsable: [] };
+  d.items.forEach(i => { if (porTipo[i.tipo]) porTipo[i.tipo].push(i); });
+
+  const pinta = (tipo) => {
+    const cont = $('#cat-' + tipo);
+    const items = porTipo[tipo];
+    if (!items.length) { cont.innerHTML = empty('Sin entradas'); return; }
+    cont.innerHTML = items.map(i => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)">
+        <div>
+          <div>${i.valor} ${i.activo ? '' : '<span class="badge gris">inactivo</span>'}</div>
+          ${tipo === 'Responsable' ? `<div class="muted" style="font-size:11px">${i.correo || 'sin correo'}</div>` : ''}
+        </div>
+        <button class="btn" style="padding:4px 8px" data-edit="${tipo}|${i.valor}">✏️</button>
+      </div>`).join('');
+    cont.querySelectorAll('[data-edit]').forEach(b =>
+      b.addEventListener('click', () => {
+        const [t, v] = b.dataset.edit.split('|');
+        const item = porTipo[t].find(x => x.valor === v);
+        abrirFormCatalogo(item);
+      }));
+  };
+  ['Area', 'Modulo', 'Responsable'].forEach(pinta);
+
+  $('#btn-nueva-cat').addEventListener('click', () => abrirFormCatalogo(null));
+}
+
+/* Formulario modal de entrada de catálogo (crear/editar). */
+function abrirFormCatalogo(item) {
+  const esEdit = !!item;
+  const tipo = item ? item.tipo : 'Area';
+  const opcionesTipo = ['Area', 'Modulo', 'Responsable']
+    .map(t => `<option value="${t}" ${t === tipo ? 'selected' : ''}>${t}</option>`).join('');
+
+  $('#modal-content').innerHTML = `
+    <h2>${esEdit ? 'Editar' : 'Nueva'} entrada de catálogo</h2>
+    <div style="margin-top:14px;max-width:420px">
+      <h3>Tipo</h3>
+      <select id="cf-tipo" class="search-box" style="width:100%" ${esEdit ? 'disabled' : ''}>${opcionesTipo}</select>
+      <h3 style="margin-top:10px">Valor</h3>
+      <input type="text" id="cf-valor" class="search-box" style="width:100%"
+        value="${esEdit ? item.valor : ''}" ${esEdit ? 'readonly' : ''} placeholder="Ej: Módulo 5">
+      <div id="cf-correo-wrap" style="margin-top:10px;${tipo === 'Responsable' ? '' : 'display:none'}">
+        <h3>Correo (para notificaciones futuras)</h3>
+        <input type="email" id="cf-correo" class="search-box" style="width:100%"
+          value="${esEdit ? (item.correo || '') : ''}" placeholder="nombre@empresa.com">
+      </div>
+      <label style="display:block;margin-top:12px">
+        <input type="checkbox" id="cf-activo" ${!esEdit || item.activo ? 'checked' : ''}> Activo
+      </label>
+    </div>
+    <div id="cf-error" style="color:#ef9a9a;margin-top:12px"></div>
+    <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn" id="cf-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="cf-guardar">Guardar</button>
+    </div>`;
+  $('#modal').classList.remove('hidden');
+
+  $('#cf-tipo').addEventListener('change', (e) => {
+    $('#cf-correo-wrap').style.display = (e.target.value === 'Responsable') ? 'block' : 'none';
+  });
+  $('#cf-cancelar').addEventListener('click', () => $('#modal').classList.add('hidden'));
+  $('#cf-guardar').addEventListener('click', async () => {
+    const datos = {
+      tipo: $('#cf-tipo').value,
+      valor: $('#cf-valor').value,
+      correo: $('#cf-correo') ? $('#cf-correo').value : '',
+      activo: $('#cf-activo').checked
+    };
+    const err = $('#cf-error');
+    if (!datos.valor.trim()) { err.textContent = 'El valor no puede estar vacío.'; return; }
+    const btn = $('#cf-guardar'); btn.disabled = true; btn.textContent = 'Guardando…';
+    try {
+      const r = await api('guardarEntradaCatalogo', datos);
+      if (!r.ok) { err.textContent = r.error || 'No se pudo guardar.'; btn.disabled = false; btn.textContent = 'Guardar'; return; }
+      $('#modal').classList.add('hidden');
+      renderCatalogos();
+    } catch (e) { err.textContent = (e && e.message) || String(e); btn.disabled = false; btn.textContent = 'Guardar'; }
+  });
+}
+
+/* ============================================================
+   MODALES: detalle de inspección / hallazgo
+   ============================================================ */
+async function abrirDetalleInspeccion(id) {
+  let d; try { d = await api('obtenerDetalleInspeccion', id); } catch (e) { return mostrarError(e); }
+  const i = d.inspeccion || {};
+  const filas = (d.criterios || []).map(c =>
+    `<tr><td>${c.codigoRuta}</td><td>${c.nombreCriterio}</td>
+     <td><span class="badge ${badgeResultado(c.resultado)}">${c.resultado}</span></td></tr>`).join('');
+  const hall = (d.hallazgos || []).map(h =>
+    `<li><strong>${h.idHallazgo}</strong> — ${recortar(h.descripcion, 70)} <span class="badge ${(h.estado||'').split(' ')[0]}">${h.estado}</span></li>`).join('') || '<li class="muted">Sin hallazgos</li>';
+
+  $('#modal-content').innerHTML = `
+    <h2 style="margin-bottom:4px">Inspección ${id}</h2>
+    <p class="muted">Cumplimiento: <strong>${pct(d.cumplimiento)}</strong></p>
+    <div class="grid-2" style="margin:14px 0">
+      <div>${campo('Fecha', i.fecha)}${campo('Responsable', i.responsable)}${campo('Área', i.area)}${campo('Módulo', i.modulo)}</div>
+      <div>${campo('Rutas', i.rutas)}${campo('Inicio', i.horaInicio)}${campo('Fin', i.horaFinal)}${campo('Duración (min)', i.duracionMin)}</div>
+    </div>
+    <h3>Criterios evaluados</h3>
+    <div class="table-wrap" style="max-height:300px;margin:8px 0 16px">
+      <table><thead><tr><th>Ruta</th><th>Criterio</th><th>Resultado</th></tr></thead><tbody>${filas || ''}</tbody></table></div>
+    <h3>Hallazgos asociados</h3><ul style="margin:8px 0 0 18px;line-height:1.9">${hall}</ul>
+    ${i.observaciones ? '<h3 style="margin-top:16px">Observaciones</h3><p class="muted">' + i.observaciones + '</p>' : ''}`;
+  $('#modal').classList.remove('hidden');
+}
+
+function abrirDetalleHallazgo(h) {
+  $('#modal-content').innerHTML = `
+    <h2>${h.idHallazgo}</h2>
+    <div style="margin-top:12px">
+      ${campo('Fecha', h.fecha)}${campo('Módulo', h.modulo)}${campo('Tipo', h.tipo)}
+      ${campo('5S', h.cincoS)}${campo('Estado', h.estado)}${campo('Responsable', h.responsable)}
+      ${campo('Fecha límite', h.fechaLimite)}${campo('Descripción', h.descripcion)}${campo('Acción', h.accion)}
+    </div>
+    ${h.evidenciaFoto ? `<p style="margin-top:12px"><a href="${h.evidenciaFoto}" target="_blank" class="btn btn-primary">Ver evidencia fotográfica</a></p>` : ''}`;
+  $('#modal').classList.remove('hidden');
+}
+
+function campo(l, v) { return `<p style="margin:4px 0"><span class="muted">${l}:</span> ${v || '—'}</p>`; }
+function badgeResultado(r) {
+  const k = (r || '').toLowerCase();
+  if (k === 'cumple') return 'verde';
+  if (k === 'parcial') return 'amarillo';
+  if (k === 'no cumple') return 'rojo';
+  return 'gris';
+}
+
+/* ============================================================
+   HELPERS DE GRÁFICOS (Chart.js)
+   ============================================================ */
+const PALETA = ['#2e7d32', '#1565c0', '#f9a825', '#c62828', '#6a1b9a', '#00838f', '#ef6c00', '#558b2f'];
+const GRID_COLOR = 'rgba(255,255,255,.08)';
+const TXT_COLOR = '#9aa7b4';
+Chart.defaults.color = TXT_COLOR;
+Chart.defaults.font.family = "'Segoe UI',sans-serif";
+
+function baseOpts(extra) {
+  return Object.assign({
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { x: { grid: { color: GRID_COLOR } }, y: { grid: { color: GRID_COLOR } } }
+  }, extra || {});
+}
+
+function barChart(id, labels, data, label, esPct, eje) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label, data, backgroundColor: labels.map((_, i) => PALETA[i % PALETA.length]) }] },
+    options: baseOpts({
+      indexAxis: eje === 'y' ? 'y' : 'x',
+      scales: esPct
+        ? (eje === 'y'
+          ? { x: { min: 0, max: 100, grid: { color: GRID_COLOR } }, y: { grid: { color: GRID_COLOR } } }
+          : { y: { min: 0, max: 100, grid: { color: GRID_COLOR } }, x: { grid: { color: GRID_COLOR } } })
+        : { x: { grid: { color: GRID_COLOR } }, y: { grid: { color: GRID_COLOR } } }
+    })
+  });
+}
+
+function lineChart(id, labels, data, label) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{ label, data, borderColor: PALETA[1], backgroundColor: 'rgba(21,101,192,.15)', fill: true, tension: .3, pointRadius: 4 }] },
+    options: baseOpts()
+  });
+}
+
+function multiLineChart(id, labels, series) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: series.map((s, i) => ({ label: s.label, data: s.data, borderColor: PALETA[i], tension: .3, pointRadius: 3, fill: false })) },
+    options: baseOpts({ plugins: { legend: { display: true } } })
+  });
+}
+
+function doughnutChart(id, labels, data) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: labels.map((_, i) => PALETA[i % PALETA.length]) }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+  });
+}
+
+function radarChart(id, labels, data) {
+  const ctx = document.getElementById(id); if (!ctx) return;
+  App.charts[id] = new Chart(ctx, {
+    type: 'radar',
+    data: { labels, datasets: [{ label: '% cumplimiento', data, borderColor: PALETA[0], backgroundColor: 'rgba(46,125,50,.2)', pointBackgroundColor: PALETA[0] }] },
+    options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 0, max: 100, grid: { color: GRID_COLOR }, angleLines: { color: GRID_COLOR }, pointLabels: { color: TXT_COLOR } } }, plugins: { legend: { display: false } } }
+  });
+}
+
+/* ============================================================
+   HELPERS varios
+   ============================================================ */
+function miniKpi(l, v, border) {
+  return `<div class="kpi ${border ? 'border-' + border : ''}"><div class="k-label">${l}</div><div class="k-value">${v ?? '—'}</div></div>`;
+}
+function recortar(s, n) { s = s || ''; return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+function mostrarError(e) {
+  $('#view').innerHTML = `<div class="empty">⚠️ Error al cargar datos.<br><span class="muted">${(e && e.message) || e}</span><br><br>
+    Verifica que las tablas normalizadas existan (menú ⚙️ Gestión 5S → Reconstruir tablas).</div>`;
+}
+
+/* ============================================================
+   Paginador reutilizable para tablas.
+   opts: { datos, tbodySel, pagerSel, tablaId, colspan, renderFila, vacioMsg }
+   Devuelve { setDatos(nuevosDatos) } para refrescar el dataset (ej. búsqueda).
+   ============================================================ */
+function crearPaginador(opts) {
+  const estado = { datos: opts.datos || [], tam: 10, pagina: 1 };
+  const tbody = $(opts.tbodySel);
+  const pagerCont = $(opts.pagerSel);
+
+  function totalPaginas() {
+    return Math.max(1, Math.ceil(estado.datos.length / estado.tam));
+  }
+
+  function pintar() {
+    const tp = totalPaginas();
+    if (estado.pagina > tp) estado.pagina = tp;
+
+    // Filas de la página actual.
+    tbody.innerHTML = '';
+    if (!estado.datos.length) {
+      tbody.innerHTML = `<tr><td colspan="${opts.colspan}">${empty(opts.vacioMsg)}</td></tr>`;
+    } else {
+      const ini = (estado.pagina - 1) * estado.tam;
+      estado.datos.slice(ini, ini + estado.tam).forEach(item => {
+        tbody.insertAdjacentHTML('beforeend', opts.renderFila(item));
+      });
+      if (opts.tablaId) habilitarOrden(opts.tablaId);
+    }
+
+    // Controles.
+    const desde = estado.datos.length ? (estado.pagina - 1) * estado.tam + 1 : 0;
+    const hasta = Math.min(estado.pagina * estado.tam, estado.datos.length);
+    pagerCont.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:12px">
+        <div class="muted" style="font-size:12px">
+          Mostrando ${desde}–${hasta} de ${estado.datos.length}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label class="muted" style="font-size:12px">Por página:
+            <select class="search-box pg-size" style="width:auto;padding:5px 8px">
+              ${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === estado.tam ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </label>
+          <button class="btn pg-prev" style="padding:5px 10px" ${estado.pagina <= 1 ? 'disabled' : ''}>◀</button>
+          <span style="font-size:12px">Pág. ${estado.pagina} / ${tp}</span>
+          <button class="btn pg-next" style="padding:5px 10px" ${estado.pagina >= tp ? 'disabled' : ''}>▶</button>
+        </div>
+      </div>`;
+
+    pagerCont.querySelector('.pg-size').addEventListener('change', (e) => {
+      estado.tam = Number(e.target.value); estado.pagina = 1; pintar();
+    });
+    pagerCont.querySelector('.pg-prev').addEventListener('click', () => { if (estado.pagina > 1) { estado.pagina--; pintar(); } });
+    pagerCont.querySelector('.pg-next').addEventListener('click', () => { if (estado.pagina < totalPaginas()) { estado.pagina++; pintar(); } });
+  }
+
+  pintar();
+  return {
+    setDatos(nuevos) { estado.datos = nuevos || []; estado.pagina = 1; pintar(); }
+  };
+}
+
+/* Ordenamiento de columnas de tabla por clic en th. */
+function habilitarOrden(tablaId) {
+  const tabla = document.getElementById(tablaId); if (!tabla) return;
+  tabla.querySelectorAll('th').forEach((th, idx) => {
+    th.addEventListener('click', () => {
+      const tbody = tabla.querySelector('tbody');
+      const filas = Array.from(tbody.querySelectorAll('tr'));
+      const asc = th.dataset.asc !== 'true';
+      th.dataset.asc = asc;
+      filas.sort((a, b) => {
+        const x = a.children[idx].innerText.trim(), y = b.children[idx].innerText.trim();
+        const nx = parseFloat(x.replace('%', '')), ny = parseFloat(y.replace('%', ''));
+        if (!isNaN(nx) && !isNaN(ny)) return asc ? nx - ny : ny - nx;
+        return asc ? x.localeCompare(y, 'es') : y.localeCompare(x, 'es');
+      });
+      filas.forEach(f => tbody.appendChild(f));
+    });
+  });
+}
+</script>
