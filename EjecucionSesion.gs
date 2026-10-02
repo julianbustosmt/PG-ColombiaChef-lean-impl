@@ -103,6 +103,13 @@ function reprogramarSesion(idSesion, cambios) {
       Usuario_Cambio: usuario
     });
     cacheLimpiar();
+
+    // Fase 4: actualizar el evento de Calendar con la nueva fecha/hora.
+    try {
+      var sAct = buscarSesion(idSesion);
+      if (sAct) actualizarEventoSesion(sAct);
+    } catch (e2) { log_('calendar reprogramar: ' + e2); }
+
     return { ok: true };
   } catch (e) {
     log_('reprogramarSesion error: ' + e);
@@ -129,6 +136,10 @@ function cancelarSesion(idSesion, motivo) {
       Usuario_Cambio: usuario
     });
     cacheLimpiar();
+
+    // Fase 4: eliminar o marcar el evento de Calendar (según CONFIG).
+    try { cancelarEventoSesion(s); } catch (e2) { log_('calendar cancelar: ' + e2); }
+
     return { ok: true };
   } catch (e) {
     log_('cancelarSesion error: ' + e);

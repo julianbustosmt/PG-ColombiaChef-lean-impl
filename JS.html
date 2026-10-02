@@ -780,7 +780,8 @@ async function abrirDetalleSesion(idSesion) {
       <div>${campo('Fecha', fFecha(s.fecha))}${campo('Hora', s.horaInicioProg)}
            ${campo('Duración estimada (min)', s.duracionEstimada)}${campo('ID sesión', s.id)}</div>
       <div>${campo('Área', s.area)}${campo('Módulo', s.modulo)}
-           ${campo('Responsable', s.responsable)}${campo('Correo', s.correoResponsable)}</div>
+           ${campo('Responsable', s.responsable)}${campo('Correo', s.correoResponsable)}
+           ${campo('Google Calendar', s.idCalendar ? '🗓️ Sincronizada' : '—')}</div>
     </div>
     <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
       ${puedeIniciar ? '<button class="btn btn-primary" id="ses-iniciar">▶ Iniciar inspección</button>' : ''}

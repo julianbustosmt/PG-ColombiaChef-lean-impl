@@ -154,6 +154,25 @@ var CONFIG = {
       area: 'Área o proceso',
       modulo: 'Módulo, línea o zona'
     }
+  },
+
+  // ---- Google Calendar (Fase 4) ----------------------------------------
+  CALENDARIO: {
+    // ID del calendario donde se crean los eventos.
+    // 'primary' = calendario principal de quien ejecuta/despliega la Web App.
+    // Para un calendario compartido de planta, pega aquí su ID
+    // (Calendar -> Configuración del calendario -> "ID de calendario").
+    CALENDAR_ID: 'primary',
+
+    // Duración por defecto (min) si la sesión no tiene duración estimada.
+    DURACION_DEFECTO_MIN: 15,
+
+    // Al cancelar una sesión: 'eliminar' el evento o 'marcar' (renombrar
+    // con prefijo [CANCELADA] conservando trazabilidad). Recomendado: 'marcar'.
+    AL_CANCELAR: 'marcar',
+
+    // Prefijo de título para eventos de sesiones canceladas.
+    PREFIJO_CANCELADA: '[CANCELADA] '
   }
 };
 

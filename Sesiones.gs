@@ -98,6 +98,12 @@ function generarSesionesProgramadas(horizonteDias) {
     // Escritura por lotes (append en bloque = rápido).
     if (nuevas.length) escribirSesionesEnLote(nuevas);
     cacheLimpiar();
+
+    // Fase 4: crear eventos de Calendar para las sesiones con sincronización
+    // activa (degradable: si Calendar falla, no afecta la generación).
+    if (nuevas.length) {
+      try { sincronizarCalendario(); } catch (e) { log_('sync calendar tras generar: ' + e); }
+    }
     return { creadas: nuevas.length };
   } catch (e) {
     log_('generarSesionesProgramadas error: ' + e);

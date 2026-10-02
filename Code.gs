@@ -38,6 +38,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Generar sesiones programadas', 'generarSesionesProgramadas')
     .addItem('Actualizar estados de sesiones', 'actualizarEstadosSesiones')
+    .addItem('Sincronizar Google Calendar', 'sincronizarCalendario')
     .addItem('Crear/sembrar catálogos maestros', 'asegurarCatalogosMaestros')
     .addItem('Sincronizar Form con catálogos', 'sincronizarFormConCatalogo')
     .addSeparator()

@@ -490,8 +490,9 @@ function instalarTriggers() {
  */
 function tareasDiarias() {
   try {
-    generarSesionesProgramadas();
-    actualizarEstadosSesiones();
+    generarSesionesProgramadas();   // genera sesiones futuras (ya sincroniza Calendar)
+    actualizarEstadosSesiones();    // Programada -> Vencida
+    sincronizarCalendario();        // red de seguridad: crea eventos faltantes
   } catch (e) {
     log_('tareasDiarias error: ' + e);
   }
