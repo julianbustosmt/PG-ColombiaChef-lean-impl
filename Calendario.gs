@@ -15,17 +15,28 @@
  * ============================================================
  */
 
-/** Devuelve el CalendarApp del calendario configurado, o null si falla. */
+/**
+ * Devuelve el CalendarApp del calendario configurado.
+ * IMPORTANTE: NO atrapamos el error de permisos aquí. Si falta la
+ * autorización de Calendar, el error debe propagarse para que Apps Script
+ * muestre el diálogo de autorización (si lo atrapáramos, nunca lo pediría).
+ */
 function obtenerCalendar() {
-  try {
-    var id = (CONFIG.CALENDARIO && CONFIG.CALENDARIO.CALENDAR_ID) || 'primary';
-    return id === 'primary'
-      ? CalendarApp.getDefaultCalendar()
-      : CalendarApp.getCalendarById(id);
-  } catch (e) {
-    log_('obtenerCalendar error: ' + e);
-    return null;
-  }
+  var id = (CONFIG.CALENDARIO && CONFIG.CALENDARIO.CALENDAR_ID) || 'primary';
+  return id === 'primary'
+    ? CalendarApp.getDefaultCalendar()
+    : CalendarApp.getCalendarById(id);
+}
+
+/**
+ * Función de AUTORIZACIÓN explícita. Ejecútala UNA vez desde el editor de
+ * Apps Script para forzar el diálogo de permisos de Calendar.
+ * Hace una llamada mínima que requiere el scope, sin capturar el error.
+ */
+function autorizarCalendar() {
+  var cal = CalendarApp.getDefaultCalendar();
+  Logger.log('Calendar autorizado: ' + cal.getName());
+  return 'OK: ' + cal.getName();
 }
 
 /** ¿La programación/sesión pide sincronización con Calendar? */
