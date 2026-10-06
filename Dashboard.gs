@@ -128,8 +128,62 @@ function obtenerHallazgos(filtros) {
         idHallazgo: h.idHallazgo, fecha: h.fecha, area: h.area, modulo: h.modulo,
         ruta: h.idRutaVinculada, tipo: h.tipo, descripcion: h.descripcion,
         cincoS: h.cincoS, responsable: h.responsableAccion, fechaLimite: h.fechaLimite,
-        estado: h.estado, correccionInmediata: h.correccionInmediata,
+        estado: h.estadoGestion || h.estado,   // estado efectivo (híbrido)
+        estadoLegacy: h.estado,
+        vencido: h.vencido,
+        correccionInmediata: h.correccionInmediata,
         accion: h.accion, diasAbiertos: h.diasAbiertos, evidenciaFoto: h.evidenciaFoto
+      };
+    })
+  };
+}
+
+// ============================================================
+//  Sección INSPECCIONES (independiente)
+// ============================================================
+
+/**
+ * Listado de inspecciones con KPIs (sección 4, 5, 24).
+ * Reutiliza cargarInspecciones/filtrarInspecciones existentes.
+ */
+function obtenerInspecciones(filtros) {
+  filtros = filtros || {};
+  var todas = cargarInspecciones();
+  var insp = filtrarInspecciones(todas, filtros);
+
+  // Filtros adicionales propios de la vista Inspecciones.
+  if (filtros.cumplMin != null && filtros.cumplMin !== '') {
+    insp = insp.filter(function (i) { return i.cumplimiento != null && i.cumplimiento >= Number(filtros.cumplMin); });
+  }
+  if (filtros.cumplMax != null && filtros.cumplMax !== '') {
+    insp = insp.filter(function (i) { return i.cumplimiento != null && i.cumplimiento <= Number(filtros.cumplMax); });
+  }
+  if (filtros.conHallazgos === 'si') insp = insp.filter(function (i) { return i.numHallazgos > 0; });
+  if (filtros.conHallazgos === 'no') insp = insp.filter(function (i) { return !i.numHallazgos; });
+
+  var cumpls = insp.filter(function (i) { return i.cumplimiento != null; }).map(function (i) { return i.cumplimiento; });
+  var durs = insp.filter(function (i) { return i.duracionMin != null; }).map(function (i) { return i.duracionMin; });
+  var completadas = insp.filter(function (i) { return i.completada; }).length;
+  var conSeg = insp.filter(function (i) { return i.requiereSeguimiento; }).length;
+
+  return {
+    kpis: {
+      total: insp.length,
+      completadas: completadas,
+      conHallazgos: insp.filter(function (i) { return i.numHallazgos > 0; }).length,
+      cumplimientoPromedio: cumpls.length ? redondear(promedio(cumpls), 1) : null,
+      cumplimientoMin: cumpls.length ? Math.min.apply(null, cumpls) : null,
+      cumplimientoMax: cumpls.length ? Math.max.apply(null, cumpls) : null,
+      duracionPromedio: durs.length ? redondear(promedio(durs), 1) : null,
+      requierenSeguimientoPct: insp.length ? redondear(conSeg / insp.length * 100, 1) : null
+    },
+    tabla: insp.map(function (i) {
+      return {
+        id: i.id, fecha: i.fecha, horaInicio: i.horaInicio, horaFinal: i.horaFinal,
+        duracionMin: i.duracionMin, responsable: i.responsable, area: i.area,
+        modulo: i.modulo, rutas: i.rutas, cumplimiento: i.cumplimiento,
+        numHallazgos: i.numHallazgos, requiereSeguimiento: i.requiereSeguimiento,
+        completada: i.completada
       };
     })
   };

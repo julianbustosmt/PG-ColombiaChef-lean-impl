@@ -127,3 +127,76 @@ Prioridad v1: **Dashboard → Cumplimiento → Hallazgos → Seguimiento → Det
 - Exportación CSV / reporte de hallazgos / PDF.
 - Mapa 5S con plano real de planta (la arquitectura ya separa datos de representación).
 - Kanban de seguimiento (Pendiente → En proceso → Cerrado) cuando exista el estado "En proceso".
+
+---
+
+# 🧩 Extensión: Inspecciones + Gestión integral de Hallazgos
+
+Extensión incremental (no reemplaza nada existente) que separa claramente
+**Inspección** (ejecución de ruta + resultados) de **Hallazgo** (anomalía y su
+gestión), y añade acciones, evidencias, historial y cierre con trazabilidad.
+
+## Archivos modificados / creados
+
+| Archivo | Estado | Qué aporta |
+|---------|--------|-----------|
+| `GestionHallazgos.gs` | **Nuevo** | Estado híbrido, acciones, evidencias, historial, `obtenerDetalleHallazgo` |
+| `ApiHallazgos.gs` | **Nuevo** | API de gestión (detalle, estado, cierre, reapertura, acción, evidencia) |
+| `Config.gs` | Modificado | Hojas `ACCIONES`/`EVIDENCIAS`/`HISTORIAL`; bloque `HALLAZGO_CFG` (estados, mapeo legacy, tipos de evidencia) |
+| `Hallazgos.gs` | Modificado | `cargarHallazgos` enriquece con `estadoGestion` (híbrido) + `vencido`; filtro por `idInspeccion`; `mapaEstadosGestionados` |
+| `Indicadores.gs` | Modificado | `kpisHallazgos` ampliado (En proceso, Cerrados, Reabiertos, % cierre, tiempo prom. cierre) sobre estado efectivo |
+| `Dashboard.gs` | Modificado | `obtenerInspecciones` (listado + KPIs); tabla de hallazgos expone estado efectivo + `vencido` |
+| `ETL.gs` | Modificado | Asegura las hojas de gestión en `reconstruirTodo` (no las regenera) |
+| `Index.html` | Modificado | Ítem de menú **Inspecciones** |
+| `JS.html` | Modificado | Vista Inspecciones; **fix del bug** (clic abre el hallazgo); ficha de hallazgo con tabs (Info/Evidencias/Gestión/Historial); navegación bidireccional |
+| `CSS.html` | Modificado | Estilos de ficha, galería, timeline, chips |
+
+## Hojas creadas (transaccionales — el ETL NO las regenera)
+
+- **`Acciones_Hallazgo`**: `ID_Accion, ID_Hallazgo, Fecha, Tipo_Accion, Descripcion, Responsable, Fecha_Limite, Estado, Comentario, Usuario, Fecha_Registro`
+- **`Evidencias_Hallazgo`**: `ID_Evidencia, ID_Hallazgo, Tipo_Evidencia, URL, Descripcion, Fecha, Usuario`
+- **`Historial_Hallazgo`**: `ID_Historial, ID_Hallazgo, Fecha, Evento, Detalle, Usuario`
+- **`Seguimiento_Hallazgos`** (existente): se amplía con columna `Usuario_Cierre`; su `Estado_Real` ahora admite los 6 estados gestionados.
+
+## Nuevos estados de hallazgo
+
+`Abierto · En proceso · Corregido · Cerrado · No aplica · Reabierto` (+ bandera derivada **Vencido**).
+
+**Estado híbrido:** si el hallazgo fue gestionado en la app → se usa ese estado; si no → se mapea el estado calculado del ETL (legacy) para no romper el histórico.
+
+## Nuevas relaciones
+
+```
+Inspección → Hallazgo        (ID_Ruta_Vinculada)   — navegación bidireccional
+Hallazgo   → Acción          (Acciones_Hallazgo, 1:N)
+Hallazgo   → Evidencia       (Evidencias_Hallazgo, 1:N)
+Hallazgo   → Historial       (Historial_Hallazgo, 1:N)
+```
+
+## Nuevas funciones backend
+
+`obtenerDetalleHallazgo`, `cambiarEstadoHallazgo`, `cerrarHallazgo`, `reabrirHallazgo`,
+`agregarAccion`, `accionesDeHallazgo`, `agregarEvidencia`, `evidenciasDeHallazgo`,
+`registrarHistorial`, `historialDeHallazgo`, `leerEstadoGestionado`, `estadoEfectivo`,
+`mapaEstadosGestionados`, `obtenerInspecciones`, y los passthrough `api*` en `ApiHallazgos.gs`.
+
+## Estado de implementación
+
+| Funcionalidad | Estado |
+|---------------|--------|
+| Sección Inspecciones (listado, filtros, KPIs, detalle, criterios, hallazgos asociados) | ✅ Implementado |
+| Fix: clic en hallazgo abre la ficha del hallazgo (no la inspección) | ✅ Implementado |
+| Ficha de hallazgo (info, inspección de origen, navegación bidireccional) | ✅ Implementado |
+| Galería de evidencias (inicial del Form + gestionadas, miniaturas Drive) | ✅ Implementado |
+| Gestión de estado + cierre con trazabilidad + reapertura | ✅ Implementado |
+| Acciones del hallazgo (1:N, no sobrescribe históricas) | ✅ Implementado |
+| Historial / línea de tiempo | ✅ Implementado |
+| Filtro por ID de inspección en Hallazgos | ✅ Implementado |
+| KPIs de hallazgos ampliados | ✅ Implementado |
+| Tolerancia a datos históricos (sin estado/responsable/evidencia) | ✅ Implementado |
+| Agregar evidencias por **URL** de Drive | ✅ Implementado |
+| **Subida directa de archivos** desde la app (sin pegar URL) | ⏳ Pendiente (arquitectura lista: tabla `Evidencias_Hallazgo` + `agregarEvidencia`) |
+
+> **Nota evidencias:** se reutiliza el mecanismo actual (Google Forms guarda la foto
+> en Drive y su URL llega al hallazgo). En la app se agregan evidencias **pegando la
+> URL** de Drive. La subida directa de archivos queda preparada para una fase posterior.

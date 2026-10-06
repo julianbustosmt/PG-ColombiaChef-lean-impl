@@ -74,25 +74,52 @@ function rankingCriterios(filasDetalle, codigoRutaFiltro) {
 
 function kpisHallazgos(hallazgos) {
   var total = hallazgos.length;
-  var por = function (estado) {
-    return hallazgos.filter(function (h) { return h.estado === estado; }).length;
+  // Estado efectivo (híbrido). Si por compatibilidad un hallazgo no lo trae,
+  // se cae al calculado legacy mapeado.
+  var eff = function (h) {
+    return h.estadoGestion || (CONFIG.HALLAZGO_CFG.MAPEO_LEGACY[h.estado] || 'Abierto');
   };
+  var porEff = function (estado) {
+    return hallazgos.filter(function (h) { return eff(h) === estado; }).length;
+  };
+  var cerrados = CONFIG.HALLAZGO_CFG.ESTADOS_CERRADOS; // Corregido/Cerrado/No aplica
+  var nCerrados = hallazgos.filter(function (h) { return cerrados.indexOf(eff(h)) !== -1; }).length;
+  var nVencidos = hallazgos.filter(function (h) {
+    return h.vencido === true || (h.vencido === undefined && h.estado === 'Vencido');
+  }).length;
+
   var corrInm = hallazgos.filter(function (h) { return h.correccionInmediata; }).length;
   var otraArea = hallazgos.filter(function (h) {
-    return h.requiereOtraArea && h.estado !== 'Corregido';
+    return h.requiereOtraArea && cerrados.indexOf(eff(h)) === -1;
   }).length;
 
   var tiempos = hallazgos
     .filter(function (h) { return h.tiempoCorreccionMin !== null; })
     .map(function (h) { return h.tiempoCorreccionMin; });
 
+  // Tiempo promedio de cierre: días entre fecha y días abiertos de los cerrados.
+  var diasCierre = hallazgos
+    .filter(function (h) { return cerrados.indexOf(eff(h)) !== -1 && h.diasAbiertos !== null; })
+    .map(function (h) { return h.diasAbiertos; });
+
   return {
     total: total,
-    corregidos: por('Corregido'),
-    enSeguimiento: por('En seguimiento'),
-    pendientes: por('Pendiente'),
-    vencidos: por('Vencido'),
-    abiertos: total - por('Corregido'),
+    // --- Campos NUEVOS (estado gestionado) ---
+    abiertosEstado: porEff('Abierto'),
+    enProceso: porEff('En proceso'),
+    corregidosEstado: porEff('Corregido'),
+    cerradosEstado: porEff('Cerrado'),
+    noAplica: porEff('No aplica'),
+    reabiertos: porEff('Reabierto'),
+    cerradosTotal: nCerrados,
+    pctCierre: total > 0 ? redondear(nCerrados / total * 100, 1) : null,
+    tiempoPromedioCierre: diasCierre.length ? redondear(promedio(diasCierre), 1) : null,
+    // --- Campos EXISTENTES (compatibilidad; ahora sobre estado efectivo) ---
+    corregidos: nCerrados,                 // "cerrados/terminados" en sentido amplio
+    enSeguimiento: porEff('En proceso'),
+    pendientes: porEff('Abierto'),
+    vencidos: nVencidos,
+    abiertos: total - nCerrados,
     correccionInmediataPct: total > 0 ? redondear(corrInm / total * 100, 1) : null,
     pendientesOtraArea: otraArea,
     tiempoPromedioCorreccion: tiempos.length ? redondear(promedio(tiempos), 1) : null,

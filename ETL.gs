@@ -44,6 +44,10 @@ function reconstruirTodo() {
 
     asegurarHojaSeguimiento(hall); // Opción A: filas editables por ingeniería
 
+    // Hojas de gestión de hallazgos (acciones/evidencias/historial). Son
+    // transaccionales: solo se asegura su existencia, nunca se regeneran.
+    try { asegurarHojasGestion(); } catch (e) { log_('asegurarHojasGestion: ' + e); }
+
     // Vinculación automática sesión<->inspección si el Form trae ID_Sesion
     // (Fase 3). Si no existe ese campo, no hace nada.
     vincularSesionesAutomatico();

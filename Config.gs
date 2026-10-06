@@ -44,7 +44,13 @@ var CONFIG = {
     // Catálogos maestros editables (áreas, módulos, responsables + correo).
     // Fuente de verdad para los desplegables de planificación, independiente
     // del histórico de inspecciones.
-    CATALOGOS_MAESTROS: 'Catalogos_Maestros'
+    CATALOGOS_MAESTROS: 'Catalogos_Maestros',
+
+    // ---- Gestión de Hallazgos (transaccionales, NO regeneradas por el ETL).
+    // Múltiples acciones, evidencias e historial por hallazgo.
+    ACCIONES: 'Acciones_Hallazgo',
+    EVIDENCIAS: 'Evidencias_Hallazgo',
+    HISTORIAL: 'Historial_Hallazgo'
   },
 
   // ---- Ponderación de resultados de criterios ---------------------------
@@ -154,6 +160,30 @@ var CONFIG = {
       area: 'Área o proceso',
       modulo: 'Módulo, línea o zona'
     }
+  },
+
+  // ---- Gestión de Hallazgos --------------------------------------------
+  HALLAZGO_CFG: {
+    // Estados GESTIONABLES por el usuario (flujo de cierre).
+    ESTADOS: ['Abierto', 'En proceso', 'Corregido', 'Cerrado', 'No aplica', 'Reabierto'],
+
+    // Estados que cuentan como "cerrados/terminados" (para % de cierre y KPIs).
+    ESTADOS_CERRADOS: ['Corregido', 'Cerrado', 'No aplica'],
+
+    // Mapeo del estado CALCULADO (histórico/legacy) -> estado gestionado,
+    // usado como fallback cuando el hallazgo aún no fue gestionado en la app.
+    MAPEO_LEGACY: {
+      'Corregido': 'Corregido',
+      'En seguimiento': 'En proceso',
+      'Pendiente': 'Abierto',
+      'Vencido': 'Abierto'   // vencido sigue abierto; "Vencido" se deriva de la fecha
+    },
+
+    // Tipos de evidencia.
+    TIPOS_EVIDENCIA: ['Inicial', 'Corrección', 'Verificación', 'Adicional'],
+
+    // Para cerrar un hallazgo se exige comentario de cierre (trazabilidad).
+    EXIGIR_COMENTARIO_CIERRE: true
   },
 
   // ---- Google Calendar (Fase 4) ----------------------------------------

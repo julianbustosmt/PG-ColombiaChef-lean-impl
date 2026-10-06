@@ -8,10 +8,18 @@
  * ============================================================
  */
 
-/** Carga Hallazgos como array de objetos tipados. */
+/** Carga Hallazgos como array de objetos tipados.
+ *  Enriquece cada hallazgo con:
+ *   - estado           : estado CALCULADO por el ETL (compatibilidad, legacy).
+ *   - estadoGestion     : estado EFECTIVO (híbrido): el gestionado por el usuario
+ *                         si existe; si no, el mapeo del calculado. Es el que
+ *                         deben usar las vistas/KPIs nuevos.
+ *   - vencido           : bandera derivada de la fecha límite.
+ */
 function cargarHallazgos() {
+  var gestion = mapaEstadosGestionados(); // {idHallazgo: 'Abierto'|...} una sola lectura
   return leerHojaObjetos(CONFIG.HOJAS.HALLAZGOS).map(function (o) {
-    return {
+    var h = {
       idHallazgo: limpiar(o['ID_Hallazgo']),
       idRutaVinculada: limpiar(o['ID_Ruta_Vinculada']),
       fecha: limpiar(o['Fecha']),
@@ -36,7 +44,32 @@ function cargarHallazgos() {
       evidenciaFoto: limpiar(o['Evidencia_Foto']),
       observaciones: limpiar(o['Observaciones'])
     };
+    // Estado híbrido.
+    var gest = gestion[h.idHallazgo];
+    h.estadoGestion = gest || (CONFIG.HALLAZGO_CFG.MAPEO_LEGACY[h.estado] || 'Abierto');
+    h.vencido = (CONFIG.HALLAZGO_CFG.ESTADOS_CERRADOS.indexOf(h.estadoGestion) === -1) &&
+      (function () { var fl = aFecha(h.fechaLimite); return !!(fl && soloFecha(fl) < soloFecha(new Date())); })();
+    return h;
   });
+}
+
+/**
+ * Lee de una sola pasada los estados gestionados desde Seguimiento_Hallazgos.
+ * Devuelve { idHallazgo: estadoReal } (solo los que tienen Estado_Real).
+ */
+function mapaEstadosGestionados() {
+  var mapa = {};
+  var d = leerHoja(CONFIG.HOJAS.SEGUIMIENTO);
+  if (!d.headers.length) return mapa;
+  var cId = buscarCol(d.idx, d.headers, ['ID Hallazgo', 'ID_Hallazgo']);
+  var cEstado = buscarCol(d.idx, d.headers, ['Estado_Real', 'Estado real', 'Estado']);
+  if (cId < 0 || cEstado < 0) return mapa;
+  d.rows.forEach(function (f) {
+    var id = limpiar(f[cId]);
+    var est = limpiar(f[cEstado]);
+    if (id && est) mapa[id] = est;
+  });
+  return mapa;
 }
 
 /**
@@ -46,10 +79,18 @@ function cargarHallazgos() {
 function filtrarHallazgos(items, filtros) {
   filtros = filtros || {};
   return items.filter(function (h) {
+    // El filtro de estado matchea contra el estado efectivo (gestionado) o
+    // el legacy, para no romper filtros guardados ni enlaces previos.
+    var estadoOk = !filtros.estado ||
+      clave(h.estadoGestion) === clave(filtros.estado) ||
+      clave(h.estado) === clave(filtros.estado);
+    // Filtro por inspección de origen (sección 22, trazabilidad).
+    var inspOk = !filtros.idInspeccion ||
+      clave(h.idRutaVinculada) === clave(filtros.idInspeccion);
     return pasaFecha(h.fecha, filtros) &&
       pasaIgual(h.area, filtros.area) &&
       pasaIgual(h.modulo, filtros.modulo) &&
-      pasaIgual(h.estado, filtros.estado) &&
+      estadoOk && inspOk &&
       pasaIgual(h.tipo, filtros.tipo) &&
       (!filtros.cincoS || clave(h.cincoS).indexOf(clave(filtros.cincoS)) !== -1);
   });

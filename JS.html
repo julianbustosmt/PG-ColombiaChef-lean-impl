@@ -146,6 +146,7 @@ function routear() {
 
   const rutas = {
     dashboard: renderDashboard,
+    inspecciones: renderInspecciones,
     calendario: renderCalendario,
     agenda: renderAgenda,
     programacion: renderProgramacion,
@@ -368,13 +369,20 @@ async function renderCriterios() {
 async function renderHallazgos() {
   let d; try { d = await api('obtenerHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
   const k = d.kpis;
+  const filtroInsp = App.filtros.idInspeccion
+    ? `<span class="chip">Inspección: ${App.filtros.idInspeccion} <a href="javascript:void(0)" id="h-limpiar-insp" style="color:#fff">✕</a></span>` : '';
+
   $('#view').innerHTML = `
     <div><div class="view-title">Gestión de Hallazgos</div></div>
     <div class="kpi-grid">
-      ${miniKpi('Total', k.total)}${miniKpi('Abiertos', k.abiertos, 'amarillo')}
-      ${miniKpi('Corregidos', k.corregidos, 'verde')}${miniKpi('Vencidos', k.vencidos, 'rojo')}
-      ${miniKpi('En seguimiento', k.enSeguimiento)}${miniKpi('Corrección inmediata', pct(k.correccionInmediataPct))}
-      ${miniKpi('Pend. otra área', k.pendientesOtraArea)}
+      ${miniKpi('Total', k.total)}${miniKpi('Abiertos', k.abiertosEstado ?? k.abiertos, 'rojo')}
+      ${miniKpi('En proceso', k.enProceso ?? k.enSeguimiento, 'azul')}
+      ${miniKpi('Corregidos', k.corregidosEstado ?? k.corregidos, 'verde')}
+      ${miniKpi('Cerrados', k.cerradosEstado ?? 0, 'verde')}
+      ${miniKpi('Vencidos', k.vencidos, 'rojo')}${miniKpi('Reabiertos', k.reabiertos ?? 0, 'morado')}
+      ${miniKpi('% Cierre', pct(k.pctCierre))}
+      ${miniKpi('T. prom. cierre', k.tiempoPromedioCierre != null ? k.tiempoPromedioCierre + ' d' : '—')}
+      ${miniKpi('Corrección inmediata', pct(k.correccionInmediataPct))}
     </div>
     <div class="grid-3">
       <div class="card"><h3>Por módulo</h3><div class="chart-wrap"><canvas id="h-mod"></canvas></div></div>
@@ -382,9 +390,12 @@ async function renderHallazgos() {
       <div class="card"><h3>Por 5S</h3><div class="chart-wrap"><canvas id="h-5s"></canvas></div></div>
     </div>
     <div class="card">
-      <div class="toolbar">
-        <h3 style="margin:0">Detalle de hallazgos</h3>
-        <input class="search-box" id="h-buscar" placeholder="Buscar…">
+      <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap">
+        <h3 style="margin:0">Detalle de hallazgos ${filtroInsp}</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input class="search-box" id="h-insp" placeholder="Filtrar por ID inspección…" style="width:200px" value="${App.filtros.idInspeccion || ''}">
+          <input class="search-box" id="h-buscar" placeholder="Buscar…" style="width:180px">
+        </div>
       </div>
       <div class="table-wrap"><table id="h-tabla"><thead><tr>
         <th>ID</th><th>Fecha</th><th>Módulo</th><th>Ruta</th><th>Tipo</th><th>Descripción</th>
@@ -402,6 +413,15 @@ async function renderHallazgos() {
     renderTablaHallazgos(d.tabla.filter(h =>
       JSON.stringify(h).toLowerCase().includes(q)));
   });
+  // Filtro por ID de inspección (recarga desde servidor para traer todos).
+  $('#h-insp').addEventListener('change', (e) => {
+    App.filtros.idInspeccion = e.target.value.trim();
+    renderHallazgos();
+  });
+  const limpiarInsp = $('#h-limpiar-insp');
+  if (limpiarInsp) limpiarInsp.addEventListener('click', () => {
+    delete App.filtros.idInspeccion; renderHallazgos();
+  });
 }
 
 function renderTablaHallazgos(filas) {
@@ -410,15 +430,31 @@ function renderTablaHallazgos(filas) {
   if (!filas.length) { tb.innerHTML = `<tr><td colspan="11">${empty('Sin hallazgos')}</td></tr>`; return; }
   filas.forEach(h => {
     const tr = el('tr', 'row-click');
-    const est = (h.estado || '').split(' ')[0];
-    tr.innerHTML = `<td>${h.idHallazgo}</td><td>${h.fecha || '—'}</td><td>${h.modulo || '—'}</td>
+    const estadoTxt = h.vencido ? `${h.estado} · Vencido` : h.estado;
+    tr.innerHTML = `<td>${h.idHallazgo}</td><td>${fFecha(h.fecha)}</td><td>${h.modulo || '—'}</td>
       <td>${h.ruta || '—'}</td><td>${h.tipo || '—'}</td><td title="${h.descripcion}">${recortar(h.descripcion, 45)}</td>
-      <td>${recortar(h.cincoS, 18)}</td><td>${h.responsable || '—'}</td><td>${h.fechaLimite || '—'}</td>
-      <td><span class="badge ${est}">${h.estado || '—'}</span></td><td>${h.diasAbiertos ?? '—'}</td>`;
-    tr.addEventListener('click', () => h.ruta ? abrirDetalleInspeccion(h.ruta) : abrirDetalleHallazgo(h));
+      <td>${recortar(h.cincoS, 18)}</td><td>${h.responsable || '—'}</td><td>${fFecha(h.fechaLimite)}</td>
+      <td>${badgeEstadoHallazgo(h.estado, h.vencido)}</td><td>${h.diasAbiertos ?? '—'}</td>`;
+    // FIX: al hacer clic SIEMPRE se abre la ficha del HALLAZGO (antes abría la
+    // inspección). La inspección de origen se accede desde dentro de la ficha.
+    tr.addEventListener('click', () => abrirDetalleHallazgo(h.idHallazgo));
     tb.appendChild(tr);
   });
   habilitarOrden('h-tabla');
+}
+
+/* Badge visual unificado para los estados de hallazgo (gestionados + vencido). */
+function badgeEstadoHallazgo(estado, vencido) {
+  const map = {
+    'Abierto': 'rojo', 'En proceso': 'azul', 'Corregido': 'verde',
+    'Cerrado': 'verde', 'No aplica': 'gris', 'Reabierto': 'morado',
+    // legacy
+    'Pendiente': 'rojo', 'En seguimiento': 'azul', 'Vencido': 'rojo'
+  };
+  const cls = map[estado] || 'gris';
+  let html = `<span class="badge ${cls}">${estado || '—'}</span>`;
+  if (vencido && estado !== 'Vencido') html += ` <span class="badge rojo">Vencido</span>`;
+  return html;
 }
 
 /* ============================================================
@@ -739,6 +775,84 @@ async function guardarProgramacionDesdeForm() {
     err.textContent = (e && e.message) || String(e);
     btn.disabled = false; btn.textContent = 'Crear programación';
   }
+}
+
+/* ============================================================
+   VISTA: INSPECCIONES (nueva sección independiente)
+   ============================================================ */
+async function renderInspecciones() {
+  let d; try { d = await api('obtenerInspecciones', App.filtros); } catch (e) { return mostrarError(e); }
+  const k = d.kpis;
+
+  $('#view').innerHTML = `
+    <div><div class="view-title">Inspecciones</div>
+    <div class="view-sub">Ejecuciones de rutas 5S y sus resultados</div></div>
+    <div class="kpi-grid">
+      ${miniKpi('Total', k.total)}
+      ${miniKpi('Completadas', k.completadas, 'verde')}
+      ${miniKpi('Con hallazgos', k.conHallazgos, 'amarillo')}
+      ${miniKpi('Cumpl. promedio', k.cumplimientoPromedio != null ? k.cumplimientoPromedio + '%' : '—')}
+      ${miniKpi('Cumpl. mínimo', k.cumplimientoMin != null ? k.cumplimientoMin + '%' : '—')}
+      ${miniKpi('Cumpl. máximo', k.cumplimientoMax != null ? k.cumplimientoMax + '%' : '—')}
+      ${miniKpi('Duración prom.', k.duracionPromedio != null ? k.duracionPromedio + ' min' : '—')}
+      ${miniKpi('Req. seguimiento', k.requierenSeguimientoPct != null ? k.requierenSeguimientoPct + '%' : '—')}
+    </div>
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap">
+        <h3 style="margin:0">Listado de inspecciones</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="i-conhall" class="search-box" style="width:auto">
+            <option value="">Todas</option><option value="si">Con hallazgos</option><option value="no">Sin hallazgos</option>
+          </select>
+          <input id="i-cmin" class="search-box" style="width:110px" type="number" placeholder="Cumpl. mín %">
+          <input id="i-cmax" class="search-box" style="width:110px" type="number" placeholder="Cumpl. máx %">
+          <input class="search-box" id="i-buscar" placeholder="Buscar…" style="width:180px">
+        </div>
+      </div>
+      <div class="table-wrap"><table id="i-tabla"><thead><tr>
+        <th>ID</th><th>Fecha</th><th>Inicio</th><th>Fin</th><th>Duración</th><th>Responsable</th>
+        <th>Área</th><th>Módulo</th><th>Ruta</th><th>% Cumpl.</th><th>Hallazgos</th><th>Seguim.</th><th>Estado</th>
+      </tr></thead><tbody></tbody></table></div>
+      <div id="i-pager"></div>
+    </div>`;
+
+  const filaInsp = (i) => {
+    const sem = i.cumplimiento == null ? 'gris' : (i.cumplimiento >= 85 ? 'verde' : i.cumplimiento >= 70 ? 'amarillo' : 'rojo');
+    return `<tr class="row-click" data-id="${i.id}">
+      <td>${i.id}</td><td>${fFecha(i.fecha)}</td><td>${i.horaInicio || '—'}</td><td>${i.horaFinal || '—'}</td>
+      <td>${i.duracionMin != null ? i.duracionMin + ' min' : '—'}</td><td>${i.responsable || '—'}</td>
+      <td>${i.area || '—'}</td><td>${i.modulo || '—'}</td><td>${i.rutas || '—'}</td>
+      <td><span class="badge ${sem}">${i.cumplimiento != null ? i.cumplimiento + '%' : '—'}</span></td>
+      <td>${i.numHallazgos || 0}</td><td>${i.requiereSeguimiento ? 'Sí' : 'No'}</td>
+      <td>${i.completada ? '<span class="badge verde">Completada</span>' : '<span class="badge amarillo">Abierta</span>'}</td></tr>`;
+  };
+
+  let dataset = d.tabla.slice();
+  const pager = crearPaginador({
+    datos: dataset, tbodySel: '#i-tabla tbody', pagerSel: '#i-pager',
+    tablaId: 'i-tabla', colspan: 13, renderFila: filaInsp,
+    vacioMsg: 'No hay inspecciones con estos filtros.'
+  });
+  // Clic en fila -> detalle de inspección (delegación tras cada repintado).
+  $('#i-tabla tbody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-id]'); if (tr) abrirDetalleInspeccion(tr.dataset.id);
+  });
+
+  const refiltrar = () => {
+    const q = ($('#i-buscar').value || '').toLowerCase();
+    const conh = $('#i-conhall').value;
+    const cmin = $('#i-cmin').value, cmax = $('#i-cmax').value;
+    pager.setDatos(d.tabla.filter(i => {
+      if (conh === 'si' && !i.numHallazgos) return false;
+      if (conh === 'no' && i.numHallazgos) return false;
+      if (cmin !== '' && !(i.cumplimiento != null && i.cumplimiento >= Number(cmin))) return false;
+      if (cmax !== '' && !(i.cumplimiento != null && i.cumplimiento <= Number(cmax))) return false;
+      return !q || JSON.stringify(i).toLowerCase().includes(q);
+    }));
+  };
+  ['i-buscar', 'i-conhall', 'i-cmin', 'i-cmax'].forEach(id => {
+    const elt = $('#' + id); if (elt) elt.addEventListener('input', refiltrar);
+  });
 }
 
 /* ============================================================
@@ -1066,34 +1180,233 @@ async function abrirDetalleInspeccion(id) {
   const filas = (d.criterios || []).map(c =>
     `<tr><td>${c.codigoRuta}</td><td>${c.nombreCriterio}</td>
      <td><span class="badge ${badgeResultado(c.resultado)}">${c.resultado}</span></td></tr>`).join('');
-  const hall = (d.hallazgos || []).map(h =>
-    `<li><strong>${h.idHallazgo}</strong> — ${recortar(h.descripcion, 70)} <span class="badge ${(h.estado||'').split(' ')[0]}">${h.estado}</span></li>`).join('') || '<li class="muted">Sin hallazgos</li>';
+
+  const hall = (d.hallazgos || []);
+  const hallHtml = hall.length ? hall.map(h =>
+    `<div class="hall-chip" data-hall="${h.idHallazgo}">
+       <strong>${h.idHallazgo}</strong> — ${recortar(h.descripcion, 60)}
+       ${badgeEstadoHallazgo(h.estadoGestion || h.estado, h.vencido)}
+     </div>`).join('') : '<p class="muted">Sin hallazgos generados en esta inspección.</p>';
 
   $('#modal-content').innerHTML = `
     <h2 style="margin-bottom:4px">Inspección ${id}</h2>
-    <p class="muted">Cumplimiento: <strong>${pct(d.cumplimiento)}</strong></p>
+    <p><span class="badge ${i.completada ? 'verde' : 'amarillo'}">${i.completada ? 'Completada' : 'Abierta'}</span>
+       · Cumplimiento: <strong>${pct(d.cumplimiento)}</strong></p>
     <div class="grid-2" style="margin:14px 0">
-      <div>${campo('Fecha', i.fecha)}${campo('Responsable', i.responsable)}${campo('Área', i.area)}${campo('Módulo', i.modulo)}</div>
-      <div>${campo('Rutas', i.rutas)}${campo('Inicio', i.horaInicio)}${campo('Fin', i.horaFinal)}${campo('Duración (min)', i.duracionMin)}</div>
+      <div>${campo('Fecha', fFecha(i.fecha))}${campo('Responsable', i.responsable)}${campo('Área', i.area)}
+        ${campo('Módulo', i.modulo)}${campo('¿Requiere seguimiento?', i.requiereSeguimiento ? 'Sí' : 'No')}</div>
+      <div>${campo('Rutas', i.rutas)}${campo('Inicio', i.horaInicio)}${campo('Fin', i.horaFinal)}
+        ${campo('Duración (min)', i.duracionMin)}</div>
     </div>
     <h3>Criterios evaluados</h3>
     <div class="table-wrap" style="max-height:300px;margin:8px 0 16px">
       <table><thead><tr><th>Ruta</th><th>Criterio</th><th>Resultado</th></tr></thead><tbody>${filas || ''}</tbody></table></div>
-    <h3>Hallazgos asociados</h3><ul style="margin:8px 0 0 18px;line-height:1.9">${hall}</ul>
+    <h3>Hallazgos generados en esta inspección (${hall.length})</h3>
+    <div class="hall-list">${hallHtml}</div>
     ${i.observaciones ? '<h3 style="margin-top:16px">Observaciones</h3><p class="muted">' + i.observaciones + '</p>' : ''}`;
+  $('#modal').classList.remove('hidden');
+
+  // Navegación bidireccional: clic en un hallazgo abre su ficha.
+  $$('#modal-content .hall-chip').forEach(ch =>
+    ch.addEventListener('click', () => abrirDetalleHallazgo(ch.dataset.hall)));
+}
+
+/* ============================================================
+   FICHA COMPLETA DEL HALLAZGO (nuevo detalle, secciones 10-19)
+   Recibe el ID y carga la ficha del backend (obtenerDetalleHallazgo).
+   ============================================================ */
+async function abrirDetalleHallazgo(idHallazgo) {
+  // Compatibilidad: si por error llega un objeto, extrae su id.
+  if (idHallazgo && typeof idHallazgo === 'object') idHallazgo = idHallazgo.idHallazgo;
+  let d; try { d = await api('apiDetalleHallazgo', idHallazgo); } catch (e) { return mostrarError(e); }
+  if (!d.ok) { alert(d.error || 'No se encontró el hallazgo.'); return; }
+  pintarFichaHallazgo(d);
   $('#modal').classList.remove('hidden');
 }
 
-function abrirDetalleHallazgo(h) {
+function pintarFichaHallazgo(d) {
+  const h = d.hallazgo;
+  const insp = d.inspeccion;
+
+  // Galería de evidencias agrupadas por tipo.
+  const porTipo = {};
+  (d.evidencias || []).forEach(e => { (porTipo[e.tipo] = porTipo[e.tipo] || []).push(e); });
+  let galeria = '';
+  Object.keys(porTipo).forEach(tipo => {
+    galeria += `<div class="ev-grupo"><div class="ev-tipo">${tipo}</div><div class="ev-thumbs">`;
+    porTipo[tipo].forEach(e => {
+      const src = urlImagenDrive(e.url);
+      galeria += `<a class="ev-thumb" href="${e.url}" target="_blank" title="${e.descripcion || ''}">
+        ${src ? `<img src="${src}" loading="lazy" onerror="this.parentNode.classList.add('ev-sinimg')">` : '🔗'}
+        <span>${recortar(e.descripcion || tipo, 24)}</span></a>`;
+    });
+    galeria += `</div></div>`;
+  });
+  if (!galeria) galeria = empty('Sin evidencias registradas');
+
+  // Acciones.
+  let accionesHtml = (d.acciones || []).map(a => `
+    <div class="acc-item">
+      <div class="acc-head"><strong>${a.tipo || 'Acción'}</strong>
+        <span class="badge ${a.estado === 'Cerrado' || a.estado === 'Corregido' ? 'verde' : 'azul'}">${a.estado || '—'}</span>
+        <span class="muted" style="font-size:11px">${fFecha(a.fecha)}</span></div>
+      <div>${a.descripcion || '—'}</div>
+      <div class="muted" style="font-size:12px">Resp.: ${a.responsable || 'No disponible'} · Límite: ${fFecha(a.fechaLimite)}${a.comentario ? ' · ' + a.comentario : ''}</div>
+    </div>`).join('');
+  if (!accionesHtml) accionesHtml = empty('Sin acciones registradas');
+
+  // Historial.
+  let histHtml = (d.historial || []).map(ev => `
+    <div class="tl-item"><div class="tl-dot"></div><div class="tl-body">
+      <div class="tl-fecha">${ev.fecha}</div>
+      <div><strong>${ev.evento}</strong>${ev.detalle ? ' — ' + ev.detalle : ''}</div>
+      <div class="muted" style="font-size:11px">${ev.usuario || ''}</div></div></div>`).join('');
+  if (!histHtml) histHtml = empty('Sin historial');
+
+  const dato = (v) => v || '<span class="muted">No disponible</span>';
+
   $('#modal-content').innerHTML = `
-    <h2>${h.idHallazgo}</h2>
-    <div style="margin-top:12px">
-      ${campo('Fecha', h.fecha)}${campo('Módulo', h.modulo)}${campo('Tipo', h.tipo)}
-      ${campo('5S', h.cincoS)}${campo('Estado', h.estado)}${campo('Responsable', h.responsable)}
-      ${campo('Fecha límite', h.fechaLimite)}${campo('Descripción', h.descripcion)}${campo('Acción', h.accion)}
+    <div class="ficha-head">
+      <div>
+        <h2 style="margin-bottom:4px">${h.idHallazgo}</h2>
+        <div>${badgeEstadoHallazgo(h.estado, h.vencido)}
+          ${h.estadoGestionado ? '' : '<span class="muted" style="font-size:11px">(estado automático)</span>'}</div>
+      </div>
+      <div class="ficha-meta muted">
+        <div>${h.tipo || 'Hallazgo'}</div>
+        <div>${fFecha(h.fecha)}</div>
+        <div>${h.area || '—'} · ${h.modulo || '—'} · ${h.ruta || '—'}</div>
+      </div>
     </div>
-    ${h.evidenciaFoto ? `<p style="margin-top:12px"><a href="${h.evidenciaFoto}" target="_blank" class="btn btn-primary">Ver evidencia fotográfica</a></p>` : ''}`;
-  $('#modal').classList.remove('hidden');
+
+    <div class="ficha-tabs">
+      <button class="ftab active" data-tab="info">Información</button>
+      <button class="ftab" data-tab="evid">Evidencias (${(d.evidencias || []).length})</button>
+      <button class="ftab" data-tab="gestion">Gestión</button>
+      <button class="ftab" data-tab="hist">Historial</button>
+    </div>
+
+    <div class="ftab-panel" data-panel="info">
+      <div class="grid-2">
+        <div>${campo('Descripción', h.descripcion)}${campo('Ubicación', dato(h.ubicacion))}
+          ${campo('5S relacionada', dato(h.cincoS))}${campo('Tipo de intervención', dato(h.intervencion))}
+          ${campo('Acción propuesta', dato(h.accionPropuesta))}</div>
+        <div>${campo('Responsable', dato(h.responsableAccion))}${campo('Fecha límite', fFecha(h.fechaLimite))}
+          ${campo('Área responsable', dato(h.areaResponsable))}${campo('Recurrente', h.recurrente ? 'Sí' : 'No')}
+          ${campo('Corrección inmediata', h.correccionInmediata ? 'Sí' : 'No')}${campo('Días abiertos', h.diasAbiertos)}
+          ${campo('Observaciones', dato(h.observaciones))}</div>
+      </div>
+      ${insp ? `
+      <div class="card-origen">
+        <div class="co-title">🔎 Inspección de origen</div>
+        <div class="co-grid">
+          ${campo('ID', insp.id)}${campo('Fecha', fFecha(insp.fecha))}${campo('Ruta', insp.ruta)}
+          ${campo('Área', insp.area)}${campo('Módulo', insp.modulo)}${campo('Responsable', insp.responsable)}
+          ${campo('% Cumplimiento', insp.cumplimiento != null ? insp.cumplimiento + '%' : '—')}
+        </div>
+        <button class="btn btn-primary" id="btn-ver-insp">Ver inspección completa</button>
+      </div>` : '<p class="muted" style="margin-top:12px">Sin inspección de origen vinculada.</p>'}
+    </div>
+
+    <div class="ftab-panel" data-panel="evid" hidden>
+      <div class="toolbar"><h3 style="margin:0">Evidencias</h3>
+        <button class="btn" id="btn-add-evid">+ Agregar evidencia (URL)</button></div>
+      ${galeria}
+    </div>
+
+    <div class="ftab-panel" data-panel="gestion" hidden>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Estado</h3>
+          <select id="g-estado" class="search-box" style="width:100%">
+            ${d.estadosDisponibles.map(e => `<option ${e === h.estado ? 'selected' : ''}>${e}</option>`).join('')}
+          </select>
+          <input id="g-estado-com" class="search-box" style="width:100%;margin-top:8px" placeholder="Comentario (opcional)">
+          <button class="btn btn-primary" id="btn-estado" style="margin-top:8px">Actualizar estado</button>
+          <hr style="border-color:var(--line);margin:14px 0">
+          <h3>Cierre con trazabilidad</h3>
+          <input id="g-cierre-com" class="search-box" style="width:100%" placeholder="Comentario de cierre (obligatorio)">
+          <input id="g-cierre-url" class="search-box" style="width:100%;margin-top:8px" placeholder="URL evidencia de cierre (opcional)">
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn btn-primary" id="btn-cerrar">✔ Cerrar hallazgo</button>
+            <button class="btn" id="btn-reabrir">↺ Reabrir</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Registrar acción</h3>
+          <input id="a-desc" class="search-box" style="width:100%" placeholder="Descripción de la acción">
+          <input id="a-resp" class="search-box" style="width:100%;margin-top:8px" placeholder="Responsable" list="a-resp-list">
+          <datalist id="a-resp-list"></datalist>
+          <input id="a-limite" type="date" class="search-box" style="width:100%;margin-top:8px">
+          <input id="a-com" class="search-box" style="width:100%;margin-top:8px" placeholder="Comentario">
+          <button class="btn btn-primary" id="btn-add-accion" style="margin-top:8px">Agregar acción</button>
+          <div style="margin-top:14px"><h3>Acciones registradas</h3>${accionesHtml}</div>
+        </div>
+      </div>
+      <div id="g-msg" class="muted" style="font-size:12px;margin-top:10px"></div>
+    </div>
+
+    <div class="ftab-panel" data-panel="hist" hidden>
+      <div class="timeline">${histHtml}</div>
+    </div>`;
+
+  // Tabs.
+  $$('#modal-content .ftab').forEach(btn => btn.addEventListener('click', () => {
+    $$('#modal-content .ftab').forEach(b => b.classList.toggle('active', b === btn));
+    $$('#modal-content .ftab-panel').forEach(p => p.hidden = (p.dataset.panel !== btn.dataset.tab));
+  }));
+
+  // Ver inspección.
+  const bi = $('#btn-ver-insp');
+  if (bi) bi.addEventListener('click', () => abrirDetalleInspeccion(h.ruta));
+
+  // Cargar responsables en el datalist.
+  api('apiOpcionesGestion').then(o => {
+    const dl = $('#a-resp-list');
+    if (dl) (o.responsables || []).forEach(r => dl.appendChild(new Option(r, r)));
+  }).catch(() => {});
+
+  // Acciones de gestión.
+  const recargar = () => abrirDetalleHallazgo(h.idHallazgo);
+  const msg = () => $('#g-msg');
+
+  $('#btn-estado') && $('#btn-estado').addEventListener('click', async () => {
+    const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: h.idHallazgo, nuevoEstado: $('#g-estado').value, comentario: $('#g-estado-com').value });
+    if (!r.ok) { msg().textContent = r.error; return; } recargar();
+  });
+  $('#btn-cerrar') && $('#btn-cerrar').addEventListener('click', async () => {
+    const r = await api('apiCerrarHallazgo', { idHallazgo: h.idHallazgo, comentario: $('#g-cierre-com').value, evidenciaUrl: $('#g-cierre-url').value });
+    if (!r.ok) { msg().innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; } recargar();
+  });
+  $('#btn-reabrir') && $('#btn-reabrir').addEventListener('click', async () => {
+    const r = await api('apiReabrirHallazgo', { idHallazgo: h.idHallazgo, comentario: '' });
+    if (!r.ok) { msg().textContent = r.error; return; } recargar();
+  });
+  $('#btn-add-accion') && $('#btn-add-accion').addEventListener('click', async () => {
+    if (!$('#a-desc').value.trim()) { msg().textContent = 'Describe la acción.'; return; }
+    const r = await api('apiAgregarAccion', { idHallazgo: h.idHallazgo, descripcion: $('#a-desc').value, responsable: $('#a-resp').value, fechaLimite: $('#a-limite').value, comentario: $('#a-com').value });
+    if (!r.ok) { msg().textContent = r.error; return; } recargar();
+  });
+  $('#btn-add-evid') && $('#btn-add-evid').addEventListener('click', async () => {
+    const url = prompt('Pega la URL de la evidencia (Google Drive):', '');
+    if (!url) return;
+    const tipo = prompt('Tipo (Inicial / Corrección / Verificación / Adicional):', 'Adicional') || 'Adicional';
+    const desc = prompt('Descripción (opcional):', '') || '';
+    const r = await api('apiAgregarEvidencia', { idHallazgo: h.idHallazgo, url, tipo, descripcion: desc });
+    if (!r.ok) { alert(r.error); return; } recargar();
+  });
+}
+
+/* Convierte una URL de Google Drive en URL de miniatura visualizable.
+   Si no es de Drive o no se puede, devuelve '' (se muestra un icono 🔗). */
+function urlImagenDrive(url) {
+  if (!url) return '';
+  const m = url.match(/[-\w]{25,}/); // id de archivo de Drive
+  if (/drive\.google\.com|docs\.google\.com/.test(url) && m) {
+    return `https://drive.google.com/thumbnail?id=${m[0]}&sz=w400`;
+  }
+  if (/\.(png|jpe?g|gif|webp)(\?|$)/i.test(url)) return url; // imagen directa
+  return '';
 }
 
 function campo(l, v) { return `<p style="margin:4px 0"><span class="muted">${l}:</span> ${v || '—'}</p>`; }
