@@ -484,7 +484,7 @@ async function renderSeguimiento() {
     tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
       <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
       <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
-      <td>${a.fechaLimite || '—'}</td><td><span class="badge ${est}">${a.estado}</span></td>
+      <td>${fFecha(a.fechaLimite)}</td><td><span class="badge ${est}">${a.estado}</span></td>
       <td>${a.diasAbiertos ?? '—'}</td>`;
     tb.appendChild(tr);
   });
@@ -1258,7 +1258,7 @@ function pintarFichaHallazgo(d) {
   // Historial.
   let histHtml = (d.historial || []).map(ev => `
     <div class="tl-item"><div class="tl-dot"></div><div class="tl-body">
-      <div class="tl-fecha">${ev.fecha}</div>
+      <div class="tl-fecha">${fFecha(ev.fecha)}</div>
       <div><strong>${ev.evento}</strong>${ev.detalle ? ' — ' + ev.detalle : ''}</div>
       <div class="muted" style="font-size:11px">${ev.usuario || ''}</div></div></div>`).join('');
   if (!histHtml) histHtml = empty('Sin historial');
