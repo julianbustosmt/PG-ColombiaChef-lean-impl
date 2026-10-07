@@ -82,6 +82,24 @@ function fechaISO(d) {
   return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
+/**
+ * Normaliza CUALQUIER valor de fecha a texto ISO 'yyyy-MM-dd'.
+ *  - Si es un Date         -> ISO.
+ *  - Si ya es texto ISO    -> se devuelve igual.
+ *  - Si es texto dd/mm/yyyy -> se convierte a ISO.
+ *  - Si no se puede interpretar -> se devuelve limpio (texto tal cual).
+ * Úsese al LEER celdas para que el frontend nunca reciba Date serializados
+ * ("Thu Oct 01 2026 ... GMT-0500").
+ */
+function fechaTexto(v) {
+  if (v instanceof Date) return fechaISO(v);
+  var s = limpiar(v);
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); // ya es ISO
+  var d = aFecha(s);
+  return d ? fechaISO(d) : s;
+}
+
 /** Diferencia en días completos entre dos fechas (b - a). */
 function diasEntre(a, b) {
   var fa = soloFecha(a), fb = soloFecha(b);

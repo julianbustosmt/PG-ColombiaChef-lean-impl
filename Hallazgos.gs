@@ -22,7 +22,7 @@ function cargarHallazgos() {
     var h = {
       idHallazgo: limpiar(o['ID_Hallazgo']),
       idRutaVinculada: limpiar(o['ID_Ruta_Vinculada']),
-      fecha: limpiar(o['Fecha']),
+      fecha: fechaTexto(o['Fecha']),
       area: limpiar(o['Area']),
       modulo: limpiar(o['Modulo']),
       tipo: limpiar(o['Tipo']),
@@ -35,7 +35,7 @@ function cargarHallazgos() {
       tiempoCorreccionMin: aNumero(o['Tiempo_Correccion_Min']),
       accion: limpiar(o['Accion']),
       responsableAccion: limpiar(o['Responsable_Accion']),
-      fechaLimite: limpiar(o['Fecha_Limite']),
+      fechaLimite: fechaTexto(o['Fecha_Limite']),
       requiereOtraArea: o['Requiere_Otra_Area'] === true || clave(o['Requiere_Otra_Area']) === 'true',
       areaResponsable: limpiar(o['Area_Responsable']),
       requiereEstandarizacion: o['Requiere_Estandarizacion'] === true || clave(o['Requiere_Estandarizacion']) === 'true',

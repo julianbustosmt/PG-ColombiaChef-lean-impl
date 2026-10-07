@@ -246,9 +246,9 @@ function accionesDeHallazgo(idHallazgo) {
     .filter(function (o) { return limpiar(o['ID_Hallazgo']) === limpiar(idHallazgo); })
     .map(function (o) {
       return {
-        id: limpiar(o['ID_Accion']), fecha: limpiar(o['Fecha']),
+        id: limpiar(o['ID_Accion']), fecha: fechaTexto(o['Fecha']),
         tipo: limpiar(o['Tipo_Accion']), descripcion: limpiar(o['Descripcion']),
-        responsable: limpiar(o['Responsable']), fechaLimite: limpiar(o['Fecha_Limite']),
+        responsable: limpiar(o['Responsable']), fechaLimite: fechaTexto(o['Fecha_Limite']),
         estado: limpiar(o['Estado']), comentario: limpiar(o['Comentario']),
         usuario: limpiar(o['Usuario'])
       };
@@ -307,7 +307,7 @@ function evidenciasDeHallazgo(idHallazgo, hallazgo) {
       lista.push({
         id: limpiar(o['ID_Evidencia']), tipo: limpiar(o['Tipo_Evidencia']),
         url: limpiar(o['URL']), descripcion: limpiar(o['Descripcion']),
-        fecha: limpiar(o['Fecha']), usuario: limpiar(o['Usuario']), origen: 'app'
+        fecha: fechaTexto(o['Fecha']), usuario: limpiar(o['Usuario']), origen: 'app'
       });
     });
   return lista;

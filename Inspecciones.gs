@@ -13,13 +13,13 @@ function cargarInspecciones() {
   return leerHojaObjetos(CONFIG.HOJAS.INSPECCIONES).map(function (o) {
     return {
       id: limpiar(o['ID_Inspeccion']),
-      fecha: limpiar(o['Fecha']),
+      fecha: fechaTexto(o['Fecha']),
       responsable: limpiar(o['Responsable']),
       area: limpiar(o['Area']),
       modulo: limpiar(o['Modulo']),
       rutas: limpiar(o['Rutas_Evaluadas']),
-      horaInicio: limpiar(o['Hora_Inicio']),
-      horaFinal: limpiar(o['Hora_Final']),
+      horaInicio: horaTexto(o['Hora_Inicio']),
+      horaFinal: horaTexto(o['Hora_Final']),
       duracionMin: aNumero(o['Duracion_Min']),
       cumplimiento: aNumero(o['Cumplimiento_Pct']),
       nValidos: aNumero(o['Num_Criterios_Validos']) || 0,
@@ -36,7 +36,7 @@ function cargarDetalle() {
   return leerHojaObjetos(CONFIG.HOJAS.DETALLE_INSPECCIONES).map(function (o) {
     return {
       idInspeccion: limpiar(o['ID_Inspeccion']),
-      fecha: limpiar(o['Fecha']),
+      fecha: fechaTexto(o['Fecha']),
       responsable: limpiar(o['Responsable']),
       area: limpiar(o['Area']),
       modulo: limpiar(o['Modulo']),

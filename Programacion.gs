@@ -173,8 +173,8 @@ function cargarProgramaciones() {
       diaMes: aNumero(o['Dia_Mes']),
       hora: horaTexto(o['Hora_Inicio']),
       duracion: aNumero(o['Duracion_Estimada']),
-      fechaInicio: limpiar(o['Fecha_Inicio']),
-      fechaFin: limpiar(o['Fecha_Fin']),
+      fechaInicio: fechaTexto(o['Fecha_Inicio']),
+      fechaFin: fechaTexto(o['Fecha_Fin']),
       observaciones: limpiar(o['Observaciones']),
       calendarActivo: esSi(o['Google_Calendar_Activo'])
     };

@@ -192,7 +192,7 @@ function cargarSesiones() {
     return {
       id: limpiar(o['ID_Sesion']),
       idProgramacion: limpiar(o['ID_Programacion']),
-      fecha: limpiar(o['Fecha']),
+      fecha: fechaTexto(o['Fecha']),
       horaInicioProg: horaTexto(o['Hora_Inicio_Programada']),
       horaFinProg: horaTexto(o['Hora_Fin_Programada']),
       ruta: limpiar(o['Ruta']),

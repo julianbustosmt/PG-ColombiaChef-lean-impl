@@ -22,12 +22,31 @@ const pct = (v) => (v === null || v === undefined) ? '—' : Number(v).toFixed(1
 /* Formatea una fecha ISO 'yyyy-MM-dd' a 'dd/MM/yyyy' (formato sencillo).
    Si recibe 'yyyy-MM-dd HH:mm', conserva la hora al final. */
 function fFecha(s) {
-  if (!s) return '—';
+  if (s === null || s === undefined || s === '') return '—';
   const txt = String(s).trim();
-  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
-  if (!m) return txt;
-  const dmy = `${m[3]}/${m[2]}/${m[1]}`;
-  return m[4] ? `${dmy} ${m[4]}` : dmy;
+
+  // Caso 1: ISO 'yyyy-MM-dd' (opcionalmente con hora 'HH:mm').
+  let m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (m) {
+    const dmy = `${m[3]}/${m[2]}/${m[1]}`;
+    return m[4] ? `${dmy} ${m[4]}` : dmy;
+  }
+
+  // Caso 2: la celda llegó como objeto Date serializado por Apps Script,
+  // p.ej. "Thu Oct 01 2026 00:00:00 GMT-0500 (...)". Lo parseamos con Date.
+  const d = new Date(txt);
+  if (!isNaN(d.getTime())) {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = d.getHours(), mi = d.getMinutes();
+    const base = `${dd}/${mm}/${yyyy}`;
+    // Añade la hora solo si no es medianoche (fecha pura).
+    return (hh || mi) ? `${base} ${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : base;
+  }
+
+  // Caso 3: no reconocible -> se muestra tal cual.
+  return txt;
 }
 
 function destruirCharts() {
