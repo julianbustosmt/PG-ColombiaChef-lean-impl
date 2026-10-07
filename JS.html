@@ -430,6 +430,7 @@ async function renderHallazgos() {
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input class="search-box" id="h-insp" placeholder="Filtrar por ID inspección…" style="width:200px" value="${App.filtros.idInspeccion || ''}">
           <input class="search-box" id="h-buscar" placeholder="Buscar…" style="width:180px">
+          <button class="btn" id="h-export">⬇ Exportar CSV</button>
         </div>
       </div>
       <div class="table-wrap"><table id="h-tabla"><thead><tr>
@@ -442,11 +443,13 @@ async function renderHallazgos() {
   doughnutChart('h-tipo', d.porTipo.map(x => x.etiqueta), d.porTipo.map(x => x.valor));
   doughnutChart('h-5s', d.por5S.map(x => x.etiqueta), d.por5S.map(x => x.valor));
 
-  renderTablaHallazgos(d.tabla);
+  // Dataset actualmente visible (se actualiza con el buscador) para exportar.
+  let visiblesHall = d.tabla.slice();
+  renderTablaHallazgos(visiblesHall);
   $('#h-buscar').addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase();
-    renderTablaHallazgos(d.tabla.filter(h =>
-      JSON.stringify(h).toLowerCase().includes(q)));
+    visiblesHall = d.tabla.filter(h => JSON.stringify(h).toLowerCase().includes(q));
+    renderTablaHallazgos(visiblesHall);
   });
   // Filtro por ID de inspección (recarga desde servidor para traer todos).
   $('#h-insp').addEventListener('change', (e) => {
@@ -456,6 +459,26 @@ async function renderHallazgos() {
   const limpiarInsp = $('#h-limpiar-insp');
   if (limpiarInsp) limpiarInsp.addEventListener('click', () => {
     delete App.filtros.idInspeccion; renderHallazgos();
+  });
+  // Exportar CSV de lo visible.
+  $('#h-export').addEventListener('click', () => {
+    exportarCSV('hallazgos_5S', [
+      { clave: 'idHallazgo', titulo: 'ID Hallazgo' },
+      { clave: 'fecha', titulo: 'Fecha', fmt: fFecha },
+      { clave: 'area', titulo: 'Área' },
+      { clave: 'modulo', titulo: 'Módulo' },
+      { clave: 'ruta', titulo: 'ID Inspección' },
+      { clave: 'tipo', titulo: 'Tipo' },
+      { clave: 'descripcion', titulo: 'Descripción' },
+      { clave: 'cincoS', titulo: '5S relacionada' },
+      { clave: 'responsable', titulo: 'Responsable' },
+      { clave: 'fechaLimite', titulo: 'Fecha límite', fmt: fFecha },
+      { clave: 'estado', titulo: 'Estado' },
+      { clave: 'vencido', titulo: 'Vencido', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'diasAbiertos', titulo: 'Días abiertos' },
+      { clave: 'correccionInmediata', titulo: 'Corrección inmediata', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'accion', titulo: 'Acción' }
+    ], visiblesHall);
   });
 }
 
@@ -842,6 +865,7 @@ async function renderInspecciones() {
           <input id="i-cmin" class="search-box" style="width:110px" type="number" placeholder="Cumpl. mín %">
           <input id="i-cmax" class="search-box" style="width:110px" type="number" placeholder="Cumpl. máx %">
           <input class="search-box" id="i-buscar" placeholder="Buscar…" style="width:180px">
+          <button class="btn" id="i-export">⬇ Exportar CSV</button>
         </div>
       </div>
       <div class="table-wrap"><table id="i-tabla"><thead><tr>
@@ -873,20 +897,40 @@ async function renderInspecciones() {
     const tr = e.target.closest('tr[data-id]'); if (tr) abrirDetalleInspeccion(tr.dataset.id);
   });
 
+  let visiblesInsp = d.tabla.slice(); // dataset visible para exportar
   const refiltrar = () => {
     const q = ($('#i-buscar').value || '').toLowerCase();
     const conh = $('#i-conhall').value;
     const cmin = $('#i-cmin').value, cmax = $('#i-cmax').value;
-    pager.setDatos(d.tabla.filter(i => {
+    visiblesInsp = d.tabla.filter(i => {
       if (conh === 'si' && !i.numHallazgos) return false;
       if (conh === 'no' && i.numHallazgos) return false;
       if (cmin !== '' && !(i.cumplimiento != null && i.cumplimiento >= Number(cmin))) return false;
       if (cmax !== '' && !(i.cumplimiento != null && i.cumplimiento <= Number(cmax))) return false;
       return !q || JSON.stringify(i).toLowerCase().includes(q);
-    }));
+    });
+    pager.setDatos(visiblesInsp);
   };
   ['i-buscar', 'i-conhall', 'i-cmin', 'i-cmax'].forEach(id => {
     const elt = $('#' + id); if (elt) elt.addEventListener('input', refiltrar);
+  });
+  // Exportar CSV de lo visible.
+  $('#i-export').addEventListener('click', () => {
+    exportarCSV('inspecciones_5S', [
+      { clave: 'id', titulo: 'ID Inspección' },
+      { clave: 'fecha', titulo: 'Fecha', fmt: fFecha },
+      { clave: 'horaInicio', titulo: 'Hora inicio', fmt: fHora },
+      { clave: 'horaFinal', titulo: 'Hora final', fmt: fHora },
+      { clave: 'duracionMin', titulo: 'Duración (min)' },
+      { clave: 'responsable', titulo: 'Responsable' },
+      { clave: 'area', titulo: 'Área' },
+      { clave: 'modulo', titulo: 'Módulo' },
+      { clave: 'rutas', titulo: 'Ruta(s)' },
+      { clave: 'cumplimiento', titulo: '% Cumplimiento' },
+      { clave: 'numHallazgos', titulo: 'N° Hallazgos' },
+      { clave: 'requiereSeguimiento', titulo: 'Requiere seguimiento', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'completada', titulo: 'Estado', fmt: (v) => v ? 'Completada' : 'Abierta' }
+    ], visiblesInsp);
   });
 }
 
@@ -1574,6 +1618,52 @@ function miniKpi(l, v, border) {
   return `<div class="kpi ${border ? 'border-' + border : ''}"><div class="k-label">${l}</div><div class="k-value">${v ?? '—'}</div></div>`;
 }
 function recortar(s, n) { s = s || ''; return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+/* ============================================================
+   Exportación a CSV
+   - columnas: [{ clave, titulo, fmt? }]  (fmt opcional transforma el valor)
+   - filas: array de objetos
+   Descarga compatible con el iframe sandbox de Apps Script.
+   ============================================================ */
+function exportarCSV(nombreArchivo, columnas, filas) {
+  if (!filas || !filas.length) { alert('No hay datos para exportar con los filtros actuales.'); return; }
+
+  const escapar = (v) => {
+    if (v === null || v === undefined) v = '';
+    let s = String(v).replace(/"/g, '""');       // escapa comillas
+    return `"${s}"`;                              // siempre entre comillas
+  };
+
+  const encabezado = columnas.map(c => escapar(c.titulo)).join(';'); // ';' = Excel ES
+  const lineas = filas.map(fila =>
+    columnas.map(c => {
+      let val = fila[c.clave];
+      if (c.fmt) val = c.fmt(val, fila);
+      return escapar(val);
+    }).join(';')
+  );
+  // BOM UTF-8 para que Excel respete acentos.
+  const csv = '\uFEFF' + [encabezado].concat(lineas).join('\r\n');
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const archivo = `${nombreArchivo}_${stamp}.csv`;
+
+  // Descarga: Blob + enlace temporal. Funciona dentro del iframe sandbox.
+  try {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = archivo;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  } catch (e) {
+    // Fallback: data URI (por si el sandbox bloquea Blob).
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = archivo; a.target = '_blank';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+}
 function mostrarError(e) {
   $('#view').innerHTML = `<div class="empty">⚠️ Error al cargar datos.<br><span class="muted">${(e && e.message) || e}</span><br><br>
     Verifica que las tablas normalizadas existan (menú ⚙️ Gestión 5S → Reconstruir tablas).</div>`;
