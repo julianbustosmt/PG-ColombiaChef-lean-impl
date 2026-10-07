@@ -186,6 +186,29 @@ var CONFIG = {
     EXIGIR_COMENTARIO_CIERRE: true
   },
 
+  // ---- Notificaciones (Fase 6) -----------------------------------------
+  NOTIF: {
+    // Interruptor general. Si false, no se envía ningún correo.
+    ACTIVO: false,
+
+    // Remitente visible en los correos.
+    NOMBRE_REMITENTE: 'Sistema de Gestión 5S',
+
+    // Correo del supervisor para el resumen diario ('' = no enviar resumen).
+    CORREO_SUPERVISOR: '',
+
+    // Qué avisos enviar.
+    ENVIAR: {
+      recordatorioRutasHoy: true,   // a cada responsable, sus sesiones de hoy
+      sesionesVencidas: true,       // a cada responsable, sus sesiones vencidas
+      accionesVencidas: true,       // a cada responsable, hallazgos vencidos
+      resumenDiarioSupervisor: true // resumen global al supervisor
+    },
+
+    // Límite de seguridad para no superar la cuota diaria de correos de Gmail.
+    MAX_CORREOS_POR_EJECUCION: 50
+  },
+
   // ---- Google Calendar (Fase 4) ----------------------------------------
   CALENDARIO: {
     // ID del calendario donde se crean los eventos.

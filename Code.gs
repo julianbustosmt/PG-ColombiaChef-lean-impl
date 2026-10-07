@@ -40,6 +40,7 @@ function onOpen() {
     .addItem('Actualizar estados de sesiones', 'actualizarEstadosSesiones')
     .addItem('Autorizar Google Calendar', 'autorizarCalendar')
     .addItem('Sincronizar Google Calendar', 'sincronizarCalendario')
+    .addItem('Probar notificaciones (correo)', 'probarNotificaciones')
     .addItem('Crear/sembrar catálogos maestros', 'asegurarCatalogosMaestros')
     .addItem('Sincronizar Form con catálogos', 'sincronizarFormConCatalogo')
     .addSeparator()

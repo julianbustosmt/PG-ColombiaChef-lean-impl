@@ -197,6 +197,16 @@ Hallazgo   → Historial       (Historial_Hallazgo, 1:N)
 | Agregar evidencias por **URL** de Drive | ✅ Implementado |
 | **Subida directa de archivos** desde la app (sin pegar URL) | ⏳ Pendiente (arquitectura lista: tabla `Evidencias_Hallazgo` + `agregarEvidencia`) |
 
+### Robustez y notificaciones (bloques B y A)
+
+| Mejora | Estado |
+|--------|--------|
+| IDs de inspección/hallazgo robustos (máximo existente + LockService, no número de fila) | ✅ Implementado |
+| Vínculo hallazgo→inspección por marca temporal más reciente (no "última fila") | ✅ Implementado |
+| **Notificaciones por correo** (`Notificaciones.gs`): recordatorio de rutas de hoy, sesiones vencidas, acciones vencidas, resumen diario al supervisor | ✅ Implementado (desactivado por defecto: `CONFIG.NOTIF.ACTIVO=false`) |
+
+**Activar notificaciones:** pon `CONFIG.NOTIF.ACTIVO = true`, define `CORREO_SUPERVISOR` si quieres el resumen, y asegúrate de que los responsables tengan correo en `Catalogos_Maestros`. Requiere el scope `script.send_mail` (ya en `appsscript.json`) y reautorizar. El envío ocurre en el trigger diario `tareasDiarias`. Prueba manual: menú **⚙️ → Probar notificaciones**.
+
 > **Nota evidencias:** se reutiliza el mecanismo actual (Google Forms guarda la foto
 > en Drive y su URL llega al hallazgo). En la app se agregan evidencias **pegando la
 > URL** de Drive. La subida directa de archivos queda preparada para una fase posterior.

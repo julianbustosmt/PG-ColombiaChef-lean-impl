@@ -497,6 +497,7 @@ function tareasDiarias() {
     generarSesionesProgramadas();   // genera sesiones futuras (ya sincroniza Calendar)
     actualizarEstadosSesiones();    // Programada -> Vencida
     sincronizarCalendario();        // red de seguridad: crea eventos faltantes
+    enviarNotificaciones();         // Fase 6: avisos por correo (si NOTIF.ACTIVO)
   } catch (e) {
     log_('tareasDiarias error: ' + e);
   }
