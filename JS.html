@@ -49,6 +49,22 @@ function fFecha(s) {
   return txt;
 }
 
+/* Formatea una HORA a 'HH:mm'. Tolera:
+   - texto 'HH:mm'
+   - Date serializado (incl. el valor de solo-hora anclado a 1899:
+     'Sat Dec 30 1899 12:50:00 GMT-...') -> extrae solo la hora. */
+function fHora(s) {
+  if (s === null || s === undefined || s === '') return '—';
+  const txt = String(s).trim();
+  const m = txt.match(/\b(\d{1,2}):(\d{2})\b/);   // encuentra HH:mm en el texto
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  const d = new Date(txt);
+  if (!isNaN(d.getTime())) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  return txt;
+}
+
 function destruirCharts() {
   Object.values(App.charts).forEach(c => { try { c.destroy(); } catch (e) {} });
   App.charts = {};
@@ -838,7 +854,7 @@ async function renderInspecciones() {
   const filaInsp = (i) => {
     const sem = i.cumplimiento == null ? 'gris' : (i.cumplimiento >= 85 ? 'verde' : i.cumplimiento >= 70 ? 'amarillo' : 'rojo');
     return `<tr class="row-click" data-id="${i.id}">
-      <td>${i.id}</td><td>${fFecha(i.fecha)}</td><td>${i.horaInicio || '—'}</td><td>${i.horaFinal || '—'}</td>
+      <td>${i.id}</td><td>${fFecha(i.fecha)}</td><td>${fHora(i.horaInicio)}</td><td>${fHora(i.horaFinal)}</td>
       <td>${i.duracionMin != null ? i.duracionMin + ' min' : '—'}</td><td>${i.responsable || '—'}</td>
       <td>${i.area || '—'}</td><td>${i.modulo || '—'}</td><td>${i.rutas || '—'}</td>
       <td><span class="badge ${sem}">${i.cumplimiento != null ? i.cumplimiento + '%' : '—'}</span></td>
@@ -1214,7 +1230,7 @@ async function abrirDetalleInspeccion(id) {
     <div class="grid-2" style="margin:14px 0">
       <div>${campo('Fecha', fFecha(i.fecha))}${campo('Responsable', i.responsable)}${campo('Área', i.area)}
         ${campo('Módulo', i.modulo)}${campo('¿Requiere seguimiento?', i.requiereSeguimiento ? 'Sí' : 'No')}</div>
-      <div>${campo('Rutas', i.rutas)}${campo('Inicio', i.horaInicio)}${campo('Fin', i.horaFinal)}
+      <div>${campo('Rutas', i.rutas)}${campo('Inicio', fHora(i.horaInicio))}${campo('Fin', fHora(i.horaFinal))}
         ${campo('Duración (min)', i.duracionMin)}</div>
     </div>
     <h3>Criterios evaluados</h3>

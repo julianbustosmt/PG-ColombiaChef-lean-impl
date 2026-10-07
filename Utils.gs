@@ -129,8 +129,9 @@ function aMinutosDelDia(v) {
  */
 function horaTexto(v) {
   if (v instanceof Date && !isNaN(v.getTime())) {
-    var hh = v.getHours(), mm = v.getMinutes();
-    return (hh < 10 ? '0' + hh : hh) + ':' + (mm < 10 ? '0' + mm : mm);
+    // Usamos formatDate con la zona del script: es más fiable que getHours()
+    // cuando el Date es un valor de solo-hora anclado a 1899 (offsets raros).
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm');
   }
   var s = limpiar(v);
   var m = s.match(/^(\d{1,2}):(\d{2})/);
