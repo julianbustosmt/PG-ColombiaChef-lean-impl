@@ -236,6 +236,28 @@ tbody tr:hover{background:var(--panel-2)}
 .tl-fecha{font-size:11px;color:var(--txt-dim)}
 .tl-body{font-size:13px}
 
+/* -------- Kanban -------- */
+.seg-toggle{display:flex;gap:6px}
+.kb-board{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;align-items:flex-start}
+.kb-col{flex:1 0 220px;max-width:300px;background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+.kb-col-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;font-weight:700;font-size:13px;border-radius:10px 10px 0 0;color:#fff}
+.kb-col-head.rojo{background:#c62828}.kb-col-head.azul{background:#1565c0}
+.kb-col-head.verde{background:#2e7d32}.kb-col-head.gris{background:#546e7a}.kb-col-head.morado{background:#6a1b9a}
+.kb-count{background:rgba(255,255,255,.25);border-radius:12px;padding:1px 8px;font-size:12px}
+.kb-col-body{padding:8px;display:flex;flex-direction:column;gap:8px;min-height:80px;transition:background .15s}
+.kb-col-body.kb-over{background:var(--panel-2);outline:2px dashed var(--accent-2);outline-offset:-4px}
+.kb-vacio{color:var(--txt-dim);text-align:center;font-size:12px;padding:12px}
+.kb-card{background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--accent-2);border-radius:8px;padding:9px 10px;cursor:pointer;transition:.12s}
+.kb-card:hover{border-color:var(--accent-2);transform:translateY(-1px)}
+.kb-card.kb-drag{opacity:.5}
+.kb-card-top{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:4px}
+.kb-card-desc{font-size:12.5px;line-height:1.3;margin-bottom:5px}
+.kb-card-meta{font-size:11px;color:var(--txt-dim)}
+.kb-card-acts{display:flex;justify-content:space-between;margin-top:7px}
+.kb-mover{background:var(--line);border:none;color:var(--txt);width:26px;height:22px;border-radius:5px;cursor:pointer;font-size:14px;line-height:1}
+.kb-mover:hover{background:var(--accent-2);color:#fff}
+.kb-mover:disabled{opacity:.4;cursor:default}
+
 /* -------- Responsive -------- */
 @media (max-width:1100px){
   .grid-2,.grid-3{grid-template-columns:1fr}

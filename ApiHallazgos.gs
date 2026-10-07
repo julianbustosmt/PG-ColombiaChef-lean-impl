@@ -36,6 +36,41 @@ function apiAgregarEvidencia(datos) {
   return agregarEvidencia(datos);
 }
 
+/**
+ * Datos para el tablero KANBAN de seguimiento: hallazgos agrupados por estado
+ * gestionado, respetando los filtros globales. Devuelve columnas en el orden
+ * del flujo y, dentro de cada una, tarjetas ligeras.
+ */
+function obtenerKanbanHallazgos(filtros) {
+  var hall = filtrarHallazgos(cargarHallazgos(), filtros);
+  var estados = CONFIG.HALLAZGO_CFG.ESTADOS; // orden del flujo
+  var columnas = {};
+  estados.forEach(function (e) { columnas[e] = []; });
+
+  hall.forEach(function (h) {
+    var est = h.estadoGestion || 'Abierto';
+    if (!columnas[est]) columnas[est] = []; // por si hay un estado inesperado
+    columnas[est].push({
+      idHallazgo: h.idHallazgo,
+      descripcion: h.descripcion,
+      modulo: h.modulo,
+      area: h.area,
+      tipo: h.tipo,
+      responsable: h.responsableAccion,
+      fechaLimite: h.fechaLimite,
+      vencido: h.vencido,
+      diasAbiertos: h.diasAbiertos,
+      ruta: h.idRutaVinculada
+    });
+  });
+
+  return {
+    estados: estados,
+    columnas: columnas,
+    total: hall.length
+  };
+}
+
 /** Opciones de responsables (reutiliza el catálogo maestro) para los selects. */
 function apiOpcionesGestion() {
   var cat;

@@ -9,7 +9,8 @@ const App = {
   charts: {},           // instancias Chart.js vivas (para destruir al re-render)
   vistaActual: 'dashboard',
   ruta: 'dashboard',    // fuente de verdad de navegación (independiente del hash)
-  cal: {}               // { anio, mes } del mes mostrado en el calendario
+  cal: {},              // { anio, mes } del mes mostrado en el calendario
+  seguimientoModo: 'tabla' // 'tabla' | 'kanban'
 };
 
 /* ---------- Utilidades frontend ---------- */
@@ -519,10 +520,20 @@ function badgeEstadoHallazgo(estado, vencido) {
    VISTA: SEGUIMIENTO
    ============================================================ */
 async function renderSeguimiento() {
+  // Modo de visualización: 'tabla' (default) o 'kanban'. Se recuerda en App.
+  if (!App.seguimientoModo) App.seguimientoModo = 'tabla';
+  if (App.seguimientoModo === 'kanban') return renderKanban();
+
   let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { return mostrarError(e); }
   const r = d.resumen;
   $('#view').innerHTML = `
-    <div><div class="view-title">Seguimiento de Acciones</div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div class="view-title">Seguimiento de Acciones</div>
+      <div class="seg-toggle">
+        <button class="btn btn-primary" id="seg-tabla">▤ Tabla</button>
+        <button class="btn" id="seg-kanban">▦ Kanban</button>
+      </div>
+    </div>
     <div class="kpi-grid">
       ${miniKpi('Pendientes', r.pendientes)}${miniKpi('Vencidas', r.vencidas, 'rojo')}
       ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}${miniKpi('Cerradas', r.cerradas, 'verde')}
@@ -532,6 +543,8 @@ async function renderSeguimiento() {
         <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
         <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
       </tr></thead><tbody></tbody></table></div></div>`;
+
+  $('#seg-kanban').addEventListener('click', () => { App.seguimientoModo = 'kanban'; renderSeguimiento(); });
 
   const tb = $('#s-tabla tbody');
   if (!d.acciones.length) { tb.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
@@ -549,6 +562,108 @@ async function renderSeguimiento() {
   habilitarOrden('s-tabla');
 }
 function orden(s){return {rojo:3,amarillo:2,gris:1,verde:0}[s]||0;}
+
+/* ============================================================
+   VISTA: KANBAN de seguimiento (tablero por estado)
+   ============================================================ */
+async function renderKanban() {
+  let d; try { d = await api('obtenerKanbanHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
+
+  // Colores por estado (coherentes con badgeEstadoHallazgo).
+  const colorEstado = {
+    'Abierto': 'rojo', 'En proceso': 'azul', 'Corregido': 'verde',
+    'Cerrado': 'verde', 'No aplica': 'gris', 'Reabierto': 'morado'
+  };
+
+  const columnasHtml = d.estados.map(est => {
+    const items = d.columnas[est] || [];
+    return `<div class="kb-col" data-estado="${est}">
+      <div class="kb-col-head ${colorEstado[est] || 'gris'}">
+        <span>${est}</span><span class="kb-count">${items.length}</span>
+      </div>
+      <div class="kb-col-body" data-estado="${est}">
+        ${items.map(h => tarjetaKanban(h, est, d.estados)).join('') || '<div class="kb-vacio">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+
+  $('#view').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div><div class="view-title">Seguimiento · Kanban</div>
+        <div class="view-sub">${d.total} hallazgo(s) · mueve con los botones ‹ › o arrastrando</div></div>
+      <div class="seg-toggle">
+        <button class="btn" id="seg-tabla">▤ Tabla</button>
+        <button class="btn btn-primary" id="seg-kanban">▦ Kanban</button>
+      </div>
+    </div>
+    <div class="kb-board">${columnasHtml}</div>`;
+
+  $('#seg-tabla').addEventListener('click', () => { App.seguimientoModo = 'tabla'; renderSeguimiento(); });
+
+  // Clic en tarjeta -> ficha del hallazgo (ignora clics en los botones mover).
+  $$('#view .kb-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.kb-mover')) return;
+      abrirDetalleHallazgo(card.dataset.id);
+    });
+  });
+
+  // Botones mover ‹ / › (cambian estado al anterior/siguiente del flujo).
+  $$('#view .kb-mover').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id, destino = btn.dataset.destino;
+      btn.disabled = true;
+      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: id, nuevoEstado: destino, comentario: 'Movido desde Kanban' });
+      if (!r.ok) { alert(r.error || 'No se pudo mover.'); btn.disabled = false; return; }
+      renderKanban();
+    });
+  });
+
+  habilitarDragKanban();
+}
+
+/* Tarjeta de hallazgo en el Kanban. `estadoActual` = columna donde vive.
+   Los botones ‹ › mueven al estado anterior/siguiente del flujo. */
+function tarjetaKanban(h, estadoActual, estados) {
+  const idx = estados.indexOf(estadoActual);
+  const prev = idx > 0 ? estados[idx - 1] : '';
+  const next = idx >= 0 && idx < estados.length - 1 ? estados[idx + 1] : '';
+  const venc = h.vencido ? '<span class="badge rojo" style="font-size:9px">Vencido</span>' : '';
+  return `<div class="kb-card" draggable="true" data-id="${h.idHallazgo}">
+    <div class="kb-card-top"><strong>${h.idHallazgo}</strong>${venc}</div>
+    <div class="kb-card-desc" title="${h.descripcion || ''}">${recortar(h.descripcion, 60)}</div>
+    <div class="kb-card-meta">${h.modulo || '—'} · ${h.responsable || 'sin resp.'}</div>
+    ${h.fechaLimite ? `<div class="kb-card-meta">Límite: ${fFecha(h.fechaLimite)}</div>` : ''}
+    <div class="kb-card-acts">
+      ${prev ? `<button class="kb-mover" data-id="${h.idHallazgo}" data-destino="${prev}" title="Mover a ${prev}">‹</button>` : '<span></span>'}
+      ${next ? `<button class="kb-mover" data-id="${h.idHallazgo}" data-destino="${next}" title="Mover a ${next}">›</button>` : '<span></span>'}
+    </div>
+  </div>`;
+}
+
+/* Drag & drop entre columnas (respaldo visual; el botón ‹ › es el método
+   fiable). Al soltar en otra columna, cambia el estado al de esa columna. */
+function habilitarDragKanban() {
+  let arrastrando = null;
+  $$('#view .kb-card').forEach(card => {
+    card.addEventListener('dragstart', () => { arrastrando = card; card.classList.add('kb-drag'); });
+    card.addEventListener('dragend', () => { card.classList.remove('kb-drag'); arrastrando = null; });
+  });
+  $$('#view .kb-col-body').forEach(body => {
+    body.addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('kb-over'); });
+    body.addEventListener('dragleave', () => body.classList.remove('kb-over'));
+    body.addEventListener('drop', async (e) => {
+      e.preventDefault(); body.classList.remove('kb-over');
+      if (!arrastrando) return;
+      const id = arrastrando.dataset.id;
+      const destino = body.dataset.estado;
+      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: id, nuevoEstado: destino, comentario: 'Movido desde Kanban (drag)' });
+      if (!r.ok) { alert(r.error || 'No se pudo mover.'); return; }
+      renderKanban();
+    });
+  });
+}
 
 /* ============================================================
    VISTA: ESTANDARIZACIÓN
