@@ -249,7 +249,9 @@ function obtenerActividadesEstandarizacion(filtros) {
     noRecurrentes: hall.filter(function (h) { return !h.recurrente; }).length,
     porTipoIntervencion: contarPor(hall, 'intervencion'),
     tiempoPorTipo: tiempoPromedioPorTipo(tiempos),
-    topRecurrentes: topRecurrentes(hall)
+    topRecurrentes: topRecurrentes(hall),
+    // Análisis de recurrencia AVANZADO (por similitud de texto + frecuencia).
+    recurrencia: analizarRecurrencia(filtros)
   };
 }
 

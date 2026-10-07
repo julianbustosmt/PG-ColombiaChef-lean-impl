@@ -731,20 +731,62 @@ async function renderEstandarizacion() {
       <div class="card"><h3>Por tipo de intervención</h3><div class="chart-wrap"><canvas id="e-interv"></canvas></div></div>
       <div class="card"><h3>Tiempo promedio por tipo (min)</h3><div class="chart-wrap"><canvas id="e-tiempo"></canvas></div></div>
     </div>
-    <div class="card"><h3>Top problemas recurrentes</h3>
-      <div class="table-wrap"><table><thead><tr>
-        <th>Ocurrencias</th><th>Tipo</th><th>5S</th><th>Módulo</th><th>Ejemplo</th>
-      </tr></thead><tbody id="e-rec"></tbody></table></div></div>`;
+
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap">
+        <div><h3 style="margin:0">Problemas recurrentes — candidatos a estandarizar</h3>
+          <span class="muted" style="font-size:12px" id="rec-resumen"></span></div>
+        <label class="muted" style="font-size:12px">Mín. repeticiones:
+          <select id="rec-min" class="search-box" style="width:auto">
+            <option value="2">2+</option><option value="3" selected>3+</option><option value="4">4+</option>
+          </select>
+        </label>
+      </div>
+      <div class="rec-leyenda">
+        <span><i class="leg-dot" style="background:#c62828"></i>Crónico (≈ semanal)</span>
+        <span><i class="leg-dot" style="background:#f9a825"></i>Frecuente (3+)</span>
+        <span><i class="leg-dot" style="background:#546e7a"></i>Repetido (2)</span>
+      </div>
+      <div id="rec-lista"></div>
+    </div>`;
 
   doughnutChart('e-interv', d.porTipoIntervencion.map(x => x.etiqueta), d.porTipoIntervencion.map(x => x.valor));
   barChart('e-tiempo', d.tiempoPorTipo.map(x => x.tipo), d.tiempoPorTipo.map(x => x.promedioMin), 'min');
-  const tb = $('#e-rec');
-  if (!d.topRecurrentes.length) { tb.innerHTML = `<tr><td colspan="5">${empty('Sin recurrencias detectadas')}</td></tr>`; }
-  d.topRecurrentes.forEach(r => {
-    tb.insertAdjacentHTML('beforeend',
-      `<tr><td><strong>${r.ocurrencias}</strong></td><td>${r.tipo || '—'}</td><td>${recortar(r.cincoS, 16)}</td>
-       <td>${r.modulo || '—'}</td><td title="${r.ejemplo}">${recortar(r.ejemplo, 50)}</td></tr>`);
-  });
+
+  const rec = d.recurrencia || { grupos: [], totalGrupos: 0, cronicos: 0, frecuentes: 0 };
+  $('#rec-resumen').textContent =
+    `${rec.totalGrupos} grupo(s) recurrente(s) · ${rec.cronicos} crónico(s) · ${rec.frecuentes} frecuente(s)`;
+
+  const pintarRec = () => {
+    const min = Number($('#rec-min').value);
+    const grupos = rec.grupos.filter(g => g.ocurrencias >= min);
+    const cont = $('#rec-lista');
+    if (!grupos.length) { cont.innerHTML = empty('No se detectaron problemas recurrentes con este umbral.'); return; }
+    cont.innerHTML = grupos.map(g => {
+      const col = { cronico: 'rojo', frecuente: 'amarillo', repetido: 'gris', aislado: 'gris' }[g.severidad] || 'gris';
+      const etiqueta = { cronico: 'Crónico', frecuente: 'Frecuente', repetido: 'Repetido', aislado: 'Aislado' }[g.severidad];
+      return `<div class="rec-item">
+        <div class="rec-item-head">
+          <span class="rec-oc">${g.ocurrencias}×</span>
+          <span class="badge ${col}">${etiqueta}</span>
+          <span class="rec-desc" title="${g.descripcion}">${recortar(g.descripcion, 70)}</span>
+        </div>
+        <div class="rec-item-meta">
+          ${g.cincoS ? '5S: ' + g.cincoS + ' · ' : ''}Módulos: ${g.modulos.join(', ') || '—'}
+          · ${fFecha(g.primeraFecha)} → ${fFecha(g.ultimaFecha)}
+          ${g.frecuenciaSemanal ? ' · ~' + g.frecuenciaSemanal + '/semana' : ''}
+          · Abiertos: ${g.abiertos}/${g.ocurrencias}
+        </div>
+        <div class="rec-reco">💡 ${g.recomendacion}</div>
+        <div class="rec-ids">${g.ids.map(id => `<a href="javascript:void(0)" class="rec-id" data-id="${id}">${id}</a>`).join(' ')}</div>
+      </div>`;
+    }).join('');
+    // Clic en un ID -> abre la ficha de ese hallazgo.
+    cont.querySelectorAll('.rec-id').forEach(a =>
+      a.addEventListener('click', () => abrirDetalleHallazgo(a.dataset.id)));
+  };
+  $('#rec-min').addEventListener('change', pintarRec);
+  pintarRec();
 }
 
 /* ============================================================
