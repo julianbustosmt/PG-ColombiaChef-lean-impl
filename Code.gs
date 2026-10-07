@@ -41,6 +41,8 @@ function onOpen() {
     .addItem('Autorizar Google Calendar', 'autorizarCalendar')
     .addItem('Sincronizar Google Calendar', 'sincronizarCalendario')
     .addItem('Probar notificaciones (correo)', 'probarNotificaciones')
+    .addItem('Diagnosticar notificaciones', 'diagnosticarNotificaciones')
+    .addItem('Enviar correo de prueba (a mí)', 'enviarCorreoDePrueba')
     .addItem('Crear/sembrar catálogos maestros', 'asegurarCatalogosMaestros')
     .addItem('Sincronizar Form con catálogos', 'sincronizarFormConCatalogo')
     .addSeparator()

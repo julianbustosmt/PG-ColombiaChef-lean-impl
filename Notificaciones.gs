@@ -196,3 +196,60 @@ function probarNotificaciones() {
   log_('probarNotificaciones: ' + JSON.stringify(r));
   return r;
 }
+
+/**
+ * DIAGNÓSTICO de notificaciones. Ejecutar desde el editor (ver Logs / Ejecuciones).
+ * Explica por qué se envía o NO se envía, sin mandar correos.
+ */
+function diagnosticarNotificaciones() {
+  var cfg = CONFIG.NOTIF || {};
+  var hoyISO = fechaISO(soloFecha(new Date()));
+  var sesiones = cargarSesiones();
+  var hallazgos = cargarHallazgos();
+  var correos = mapaCorreosResponsables();
+
+  var rutasHoy = sesiones.filter(function (s) {
+    return s.fecha === hoyISO &&
+      (s.estado === 'Programada' || s.estado === 'Pendiente' || s.estado === 'Reprogramada');
+  });
+  var vencidas = sesiones.filter(function (s) { return s.estado === 'Vencida'; });
+  var accVenc = hallazgos.filter(function (h) { return h.vencido; });
+
+  var d = {
+    NOTIF_ACTIVO: !!cfg.ACTIVO,
+    correoRemitente_tuCuenta: (Session.getActiveUser().getEmail && Session.getActiveUser().getEmail()) || '(desconocido)',
+    cuotaCorreosRestante: (function () { try { return MailApp.getRemainingDailyQuota(); } catch (e) { return 'error: ' + e; } })(),
+    hoyISO: hoyISO,
+    totalSesiones: sesiones.length,
+    sesionesHoy: rutasHoy.length,
+    sesionesVencidas: vencidas.length,
+    hallazgosVencidos: accVenc.length,
+    responsablesConCorreoEnCatalogo: Object.keys(correos).length,
+    correosDetectados: correos,
+    correoSupervisor: cfg.CORREO_SUPERVISOR || '(no configurado)',
+    // Responsables implicados y si tienen correo:
+    responsablesDeRutasHoy: rutasHoy.map(function (s) {
+      var c = s.correoResponsable || correos[clave(s.responsable)] || '(SIN CORREO)';
+      return s.responsable + ' -> ' + c;
+    })
+  };
+  log_('DIAGNÓSTICO NOTIFICACIONES:\n' + JSON.stringify(d, null, 2));
+  return d;
+}
+
+/**
+ * Envía un correo de PRUEBA a ti mismo (la cuenta del script), para confirmar
+ * que MailApp funciona y tienes permiso de Gmail. No depende de los datos.
+ */
+function enviarCorreoDePrueba() {
+  var yo = (Session.getActiveUser().getEmail && Session.getActiveUser().getEmail()) || '';
+  if (!yo) { log_('No se pudo obtener tu correo.'); return { ok: false }; }
+  MailApp.sendEmail({
+    to: yo,
+    name: (CONFIG.NOTIF && CONFIG.NOTIF.NOMBRE_REMITENTE) || 'Sistema 5S',
+    subject: '✅ Prueba de notificaciones 5S',
+    htmlBody: '<p>Si recibes este correo, <b>MailApp funciona</b> y el permiso de Gmail está autorizado.</p>'
+  });
+  log_('Correo de prueba enviado a ' + yo);
+  return { ok: true, enviadoA: yo };
+}
