@@ -366,6 +366,19 @@ function obtenerOCrearSubcarpeta(padre, nombre) {
 }
 
 /**
+ * AUTORIZACIÓN de Drive. Ejecutar UNA vez desde el editor para forzar el
+ * diálogo de permisos. NO lleva try/catch a propósito: el error de permiso
+ * debe propagarse para que Apps Script muestre la pantalla de autorización
+ * (si lo atrapáramos, nunca la pediría — mismo patrón que autorizarCalendar).
+ */
+function autorizarDrive() {
+  var raiz = DriveApp.getFolderById(CONFIG.HALLAZGO_CFG.DRIVE_CARPETA_RAIZ);
+  var nombre = raiz.getName();
+  Logger.log('Drive autorizado. Carpeta: ' + nombre);
+  return 'OK: ' + nombre;
+}
+
+/**
  * Diagnóstico de la carpeta de Drive. Ejecutar desde el editor para verificar
  * que el ID configurado es válido y accesible. No sube nada.
  */

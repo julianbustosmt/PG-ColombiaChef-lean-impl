@@ -145,13 +145,13 @@ function api(fn, ...args) {
 }
 
 /* ---------- Inicialización ---------- */
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
   bindUI();
-  // La carga de filtros NO debe bloquear el arranque: si falla o tarda, la app
-  // igual pinta el dashboard. Así nunca queda un spinner infinito.
-  try { await cargarOpcionesFiltros(); } catch (e) { console.warn('Filtros no cargados:', e); }
-  routear();
   window.addEventListener('hashchange', routear);
+  // Pinta el dashboard INMEDIATAMENTE (no espera al backend) para que nunca
+  // quede un spinner infinito. Los filtros se cargan en segundo plano.
+  routear();
+  cargarOpcionesFiltros().catch(e => console.warn('Filtros no cargados:', e));
 });
 
 function bindUI() {
