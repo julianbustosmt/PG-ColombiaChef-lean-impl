@@ -10,7 +10,7 @@ const App = {
   vistaActual: 'dashboard',
   ruta: 'dashboard',    // fuente de verdad de navegación (independiente del hash)
   cal: {},              // { anio, mes } del mes mostrado en el calendario
-  seguimientoModo: 'tabla', // 'tabla' | 'kanban'
+  hallazgosTab: 'tabla', // pestaña activa en Hallazgos: 'tabla' | 'seguimiento' | 'kanban'
   rastro: []            // breadcrumbs: [{tipo:'inspeccion'|'hallazgo', id, label}]
 };
 
@@ -225,7 +225,9 @@ function routear() {
   const destino = App.ruta || (location.hash ? location.hash.slice(1) : '') || 'dashboard';
   const [vista, param] = destino.split('/');
   App.vistaActual = vista;
-  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === vista));
+  // 'seguimiento' es un alias que vive dentro de Hallazgos: resalta Hallazgos.
+  const vistaMenu = (vista === 'seguimiento') ? 'hallazgos' : vista;
+  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === vistaMenu));
   destruirCharts();
   setLoader();
 
@@ -239,7 +241,9 @@ function routear() {
     cumplimiento: renderCumplimiento,
     criterios: renderCriterios,
     hallazgos: renderHallazgos,
-    seguimiento: renderSeguimiento,
+    // 'seguimiento' se fusionó en Hallazgos (pestaña interna). Redirección
+    // suave por compatibilidad con enlaces/hábitos previos.
+    seguimiento: function () { App.hallazgosTab = 'seguimiento'; renderHallazgos(); },
     estandarizacion: renderEstandarizacion,
     mapa: renderMapa,
     tendencias: renderTendencias
@@ -454,11 +458,13 @@ async function renderCriterios() {
 async function renderHallazgos() {
   let d; try { d = await api('obtenerHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
   const k = d.kpis;
-  const filtroInsp = App.filtros.idInspeccion
-    ? `<span class="chip">Inspección: ${App.filtros.idInspeccion} <a href="javascript:void(0)" id="h-limpiar-insp" style="color:#fff">✕</a></span>` : '';
+  if (!App.hallazgosTab) App.hallazgosTab = 'tabla';
+  const tab = App.hallazgosTab;
 
+  // Encabezado + KPIs + pestañas (comunes a las 3 vistas).
   $('#view').innerHTML = `
-    <div><div class="view-title">Gestión de Hallazgos</div></div>
+    <div><div class="view-title">Gestión de Hallazgos</div>
+      <div class="view-sub">Registro, seguimiento y flujo de los hallazgos 5S</div></div>
     <div class="kpi-grid">
       ${miniKpi('Total', k.total)}${miniKpi('Abiertos', k.abiertosEstado ?? k.abiertos, 'rojo')}
       ${miniKpi('En proceso', k.enProceso ?? k.enSeguimiento, 'azul')}
@@ -469,6 +475,31 @@ async function renderHallazgos() {
       ${miniKpi('T. prom. cierre', k.tiempoPromedioCierre != null ? k.tiempoPromedioCierre + ' d' : '—')}
       ${miniKpi('Corrección inmediata', pct(k.correccionInmediataPct))}
     </div>
+    <div class="ficha-tabs" id="h-tabs">
+      <button class="ftab ${tab === 'tabla' ? 'active' : ''}" data-htab="tabla">📋 Registro</button>
+      <button class="ftab ${tab === 'seguimiento' ? 'active' : ''}" data-htab="seguimiento">⏰ Seguimiento</button>
+      <button class="ftab ${tab === 'kanban' ? 'active' : ''}" data-htab="kanban">▦ Kanban</button>
+    </div>
+    <div id="h-panel"></div>`;
+
+  // Cambio de pestaña.
+  $$('#h-tabs .ftab').forEach(btn => btn.addEventListener('click', () => {
+    App.hallazgosTab = btn.dataset.htab;
+    renderHallazgos();
+  }));
+
+  // Cuerpo según pestaña.
+  if (tab === 'tabla') pintarHallazgosTabla(d);
+  else if (tab === 'seguimiento') pintarHallazgosSeguimiento();
+  else if (tab === 'kanban') pintarHallazgosKanban();
+}
+
+/* --- Pestaña REGISTRO: gráficos + tabla + exportar (lo que antes era Hallazgos) --- */
+function pintarHallazgosTabla(d) {
+  const filtroInsp = App.filtros.idInspeccion
+    ? `<span class="chip">Inspección: ${App.filtros.idInspeccion} <a href="javascript:void(0)" id="h-limpiar-insp" style="color:#fff">✕</a></span>` : '';
+
+  $('#h-panel').innerHTML = `
     <div class="grid-3">
       <div class="card"><h3>Por módulo</h3><div class="chart-wrap"><canvas id="h-mod"></canvas></div></div>
       <div class="card"><h3>Por tipo</h3><div class="chart-wrap"><canvas id="h-tipo"></canvas></div></div>
@@ -493,7 +524,6 @@ async function renderHallazgos() {
   doughnutChart('h-tipo', d.porTipo.map(x => x.etiqueta), d.porTipo.map(x => x.valor));
   doughnutChart('h-5s', d.por5S.map(x => x.etiqueta), d.por5S.map(x => x.valor));
 
-  // Dataset actualmente visible (se actualiza con el buscador) para exportar.
   let visiblesHall = d.tabla.slice();
   renderTablaHallazgos(visiblesHall);
   $('#h-buscar').addEventListener('input', (e) => {
@@ -501,7 +531,6 @@ async function renderHallazgos() {
     visiblesHall = d.tabla.filter(h => JSON.stringify(h).toLowerCase().includes(q));
     renderTablaHallazgos(visiblesHall);
   });
-  // Filtro por ID de inspección (recarga desde servidor para traer todos).
   $('#h-insp').addEventListener('change', (e) => {
     App.filtros.idInspeccion = e.target.value.trim();
     renderHallazgos();
@@ -510,7 +539,6 @@ async function renderHallazgos() {
   if (limpiarInsp) limpiarInsp.addEventListener('click', () => {
     delete App.filtros.idInspeccion; renderHallazgos();
   });
-  // Exportar CSV de lo visible.
   $('#h-export').addEventListener('click', () => {
     exportarCSV('hallazgos_5S', [
       { clave: 'idHallazgo', titulo: 'ID Hallazgo' },
@@ -530,6 +558,86 @@ async function renderHallazgos() {
       { clave: 'accion', titulo: 'Acción' }
     ], visiblesHall);
   });
+}
+
+/* --- Pestaña SEGUIMIENTO: bandeja de acción (solo lo accionable) --- */
+async function pintarHallazgosSeguimiento() {
+  const panel = $('#h-panel');
+  panel.innerHTML = '<div class="loader">Cargando…</div>';
+  let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { panel.innerHTML = empty('Error al cargar.'); return; }
+  const r = d.resumen;
+
+  // Solo lo ACCIONABLE: ocultamos lo cerrado/verde (eso ya está en Registro).
+  const accion = (d.acciones || []).filter(a => a.semaforo !== 'verde');
+  accion.sort((a, b) => orden(b.semaforo) - orden(a.semaforo));
+
+  panel.innerHTML = `
+    <div class="kpi-grid">
+      ${miniKpi('Vencidas', r.vencidas, 'rojo')}
+      ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}
+      ${miniKpi('Pendientes', r.pendientes)}
+    </div>
+    <div class="card"><h3>Acciones que requieren atención</h3>
+      <div class="table-wrap"><table id="s-tabla"><thead><tr>
+        <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
+        <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
+      </tr></thead><tbody></tbody></table></div></div>`;
+
+  const tb = $('#s-tabla tbody');
+  if (!accion.length) { tb.innerHTML = `<tr><td colspan="9">${empty('Nada pendiente de atención. ¡Todo al día!')}</td></tr>`; return; }
+  accion.forEach(a => {
+    const tr = el('tr', 'row-click');
+    tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
+      <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
+      <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
+      <td>${fFecha(a.fechaLimite)}</td><td><span class="badge ${(a.estado || '').split(' ')[0]}">${a.estado}</span></td>
+      <td>${a.diasAbiertos ?? '—'}</td>`;
+    tr.addEventListener('click', () => abrirDetalleHallazgo(a.idHallazgo));
+    tb.appendChild(tr);
+  });
+  habilitarOrden('s-tabla');
+}
+
+/* --- Pestaña KANBAN: tablero por estado --- */
+async function pintarHallazgosKanban() {
+  const panel = $('#h-panel');
+  panel.innerHTML = '<div class="loader">Cargando…</div>';
+  let d; try { d = await api('obtenerKanbanHallazgos', App.filtros); } catch (e) { panel.innerHTML = empty('Error al cargar.'); return; }
+
+  const colorEstado = {
+    'Abierto': 'rojo', 'En proceso': 'azul', 'Corregido': 'verde',
+    'Cerrado': 'verde', 'No aplica': 'gris', 'Reabierto': 'morado'
+  };
+  const columnasHtml = d.estados.map(est => {
+    const items = d.columnas[est] || [];
+    return `<div class="kb-col" data-estado="${est}">
+      <div class="kb-col-head ${colorEstado[est] || 'gris'}">
+        <span>${est}</span><span class="kb-count">${items.length}</span>
+      </div>
+      <div class="kb-col-body" data-estado="${est}">
+        ${items.map(h => tarjetaKanban(h, est, d.estados)).join('') || '<div class="kb-vacio">—</div>'}
+      </div></div>`;
+  }).join('');
+
+  panel.innerHTML = `<div class="view-sub" style="margin-bottom:8px">${d.total} hallazgo(s) · mueve con ‹ › o arrastrando</div>
+    <div class="kb-board">${columnasHtml}</div>`;
+
+  $$('#h-panel .kb-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.kb-mover')) return;
+      abrirDetalleHallazgo(card.dataset.id);
+    });
+  });
+  $$('#h-panel .kb-mover').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: btn.dataset.id, nuevoEstado: btn.dataset.destino, comentario: 'Movido desde Kanban' });
+      if (!r.ok) { alert(r.error || 'No se pudo mover.'); btn.disabled = false; return; }
+      pintarHallazgosKanban();
+    });
+  });
+  habilitarDragKanbanEn('#h-panel', pintarHallazgosKanban);
 }
 
 function renderTablaHallazgos(filas) {
@@ -566,114 +674,20 @@ function badgeEstadoHallazgo(estado, vencido) {
 }
 
 /* ============================================================
-   VISTA: SEGUIMIENTO
+   SEGUIMIENTO: fusionado en Hallazgos (pestañas internas).
+   Se conserva 'orden' (usado por la pestaña Seguimiento) y las piezas
+   del Kanban (tarjetaKanban, drag) reutilizadas por las pestañas.
    ============================================================ */
 async function renderSeguimiento() {
-  // Modo de visualización: 'tabla' (default) o 'kanban'. Se recuerda en App.
-  if (!App.seguimientoModo) App.seguimientoModo = 'tabla';
-  if (App.seguimientoModo === 'kanban') return renderKanban();
-
-  let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { return mostrarError(e); }
-  const r = d.resumen;
-  $('#view').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-      <div class="view-title">Seguimiento de Acciones</div>
-      <div class="seg-toggle">
-        <button class="btn btn-primary" id="seg-tabla">▤ Tabla</button>
-        <button class="btn" id="seg-kanban">▦ Kanban</button>
-      </div>
-    </div>
-    <div class="kpi-grid">
-      ${miniKpi('Pendientes', r.pendientes)}${miniKpi('Vencidas', r.vencidas, 'rojo')}
-      ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}${miniKpi('Cerradas', r.cerradas, 'verde')}
-    </div>
-    <div class="card"><h3>Acciones</h3>
-      <div class="table-wrap"><table id="s-tabla"><thead><tr>
-        <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
-        <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
-      </tr></thead><tbody></tbody></table></div></div>`;
-
-  $('#seg-kanban').addEventListener('click', () => { App.seguimientoModo = 'kanban'; renderSeguimiento(); });
-
-  const tb = $('#s-tabla tbody');
-  if (!d.acciones.length) { tb.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
-  d.acciones.sort((a, b) => orden(b.semaforo) - orden(a.semaforo));
-  d.acciones.forEach(a => {
-    const tr = el('tr');
-    const est = (a.estado || '').split(' ')[0];
-    tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
-      <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
-      <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
-      <td>${fFecha(a.fechaLimite)}</td><td><span class="badge ${est}">${a.estado}</span></td>
-      <td>${a.diasAbiertos ?? '—'}</td>`;
-    tb.appendChild(tr);
-  });
-  habilitarOrden('s-tabla');
+  // Compatibilidad: antes era una vista; ahora es la pestaña de Hallazgos.
+  App.hallazgosTab = 'seguimiento';
+  return renderHallazgos();
 }
 function orden(s){return {rojo:3,amarillo:2,gris:1,verde:0}[s]||0;}
 
 /* ============================================================
    VISTA: KANBAN de seguimiento (tablero por estado)
    ============================================================ */
-async function renderKanban() {
-  let d; try { d = await api('obtenerKanbanHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
-
-  // Colores por estado (coherentes con badgeEstadoHallazgo).
-  const colorEstado = {
-    'Abierto': 'rojo', 'En proceso': 'azul', 'Corregido': 'verde',
-    'Cerrado': 'verde', 'No aplica': 'gris', 'Reabierto': 'morado'
-  };
-
-  const columnasHtml = d.estados.map(est => {
-    const items = d.columnas[est] || [];
-    return `<div class="kb-col" data-estado="${est}">
-      <div class="kb-col-head ${colorEstado[est] || 'gris'}">
-        <span>${est}</span><span class="kb-count">${items.length}</span>
-      </div>
-      <div class="kb-col-body" data-estado="${est}">
-        ${items.map(h => tarjetaKanban(h, est, d.estados)).join('') || '<div class="kb-vacio">—</div>'}
-      </div>
-    </div>`;
-  }).join('');
-
-  $('#view').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-      <div><div class="view-title">Seguimiento · Kanban</div>
-        <div class="view-sub">${d.total} hallazgo(s) · mueve con los botones ‹ › o arrastrando</div></div>
-      <div class="seg-toggle">
-        <button class="btn" id="seg-tabla">▤ Tabla</button>
-        <button class="btn btn-primary" id="seg-kanban">▦ Kanban</button>
-      </div>
-    </div>
-    <div class="kb-board">${columnasHtml}</div>`;
-
-  $('#seg-tabla').addEventListener('click', () => { App.seguimientoModo = 'tabla'; renderSeguimiento(); });
-
-  // Clic en tarjeta -> ficha del hallazgo (ignora clics en los botones mover).
-  $$('#view .kb-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.kb-mover')) return;
-      abrirDetalleHallazgo(card.dataset.id);
-    });
-  });
-
-  // Botones mover ‹ / › (cambian estado al anterior/siguiente del flujo).
-  $$('#view .kb-mover').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.id, destino = btn.dataset.destino;
-      btn.disabled = true;
-      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: id, nuevoEstado: destino, comentario: 'Movido desde Kanban' });
-      if (!r.ok) { alert(r.error || 'No se pudo mover.'); btn.disabled = false; return; }
-      renderKanban();
-    });
-  });
-
-  habilitarDragKanban();
-}
-
-/* Tarjeta de hallazgo en el Kanban. `estadoActual` = columna donde vive.
-   Los botones ‹ › mueven al estado anterior/siguiente del flujo. */
 function tarjetaKanban(h, estadoActual, estados) {
   const idx = estados.indexOf(estadoActual);
   const prev = idx > 0 ? estados[idx - 1] : '';
@@ -691,15 +705,16 @@ function tarjetaKanban(h, estadoActual, estados) {
   </div>`;
 }
 
-/* Drag & drop entre columnas (respaldo visual; el botón ‹ › es el método
-   fiable). Al soltar en otra columna, cambia el estado al de esa columna. */
-function habilitarDragKanban() {
+/* Drag & drop entre columnas dentro de `contenedorSel`. Al soltar, cambia el
+   estado del hallazgo al de la columna destino y ejecuta `onCambio` (repintar).
+   El botón ‹ › sigue siendo el método fiable; esto es el respaldo visual. */
+function habilitarDragKanbanEn(contenedorSel, onCambio) {
   let arrastrando = null;
-  $$('#view .kb-card').forEach(card => {
+  $$(contenedorSel + ' .kb-card').forEach(card => {
     card.addEventListener('dragstart', () => { arrastrando = card; card.classList.add('kb-drag'); });
     card.addEventListener('dragend', () => { card.classList.remove('kb-drag'); arrastrando = null; });
   });
-  $$('#view .kb-col-body').forEach(body => {
+  $$(contenedorSel + ' .kb-col-body').forEach(body => {
     body.addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('kb-over'); });
     body.addEventListener('dragleave', () => body.classList.remove('kb-over'));
     body.addEventListener('drop', async (e) => {
@@ -709,7 +724,7 @@ function habilitarDragKanban() {
       const destino = body.dataset.estado;
       const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: id, nuevoEstado: destino, comentario: 'Movido desde Kanban (drag)' });
       if (!r.ok) { alert(r.error || 'No se pudo mover.'); return; }
-      renderKanban();
+      if (onCambio) onCambio();
     });
   });
 }
