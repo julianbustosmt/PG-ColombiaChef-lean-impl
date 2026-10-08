@@ -127,17 +127,29 @@ function empty(msg) { return `<div class="empty">${msg || 'Datos insuficientes'}
    Acepta uno o varios argumentos: api('fn', a, b, ...). */
 function api(fn, ...args) {
   return new Promise((resolve, reject) => {
-    google.script.run
-      .withSuccessHandler(resolve)
-      .withFailureHandler(reject)
-      [fn](...args);
+    let resuelto = false;
+    // Timeout de seguridad: si el backend no responde (p. ej. falta autorizar
+    // un permiso, o la función no existe), no dejamos la promesa colgada.
+    const t = setTimeout(() => {
+      if (!resuelto) { resuelto = true; reject(new Error('El servidor no respondió (posible permiso pendiente de autorizar o función no desplegada).')); }
+    }, 25000);
+    try {
+      google.script.run
+        .withSuccessHandler((r) => { if (!resuelto) { resuelto = true; clearTimeout(t); resolve(r); } })
+        .withFailureHandler((e) => { if (!resuelto) { resuelto = true; clearTimeout(t); reject(e); } })
+        [fn](...args);
+    } catch (e) {
+      if (!resuelto) { resuelto = true; clearTimeout(t); reject(e); }
+    }
   });
 }
 
 /* ---------- Inicialización ---------- */
 window.addEventListener('DOMContentLoaded', async () => {
   bindUI();
-  await cargarOpcionesFiltros();
+  // La carga de filtros NO debe bloquear el arranque: si falla o tarda, la app
+  // igual pinta el dashboard. Así nunca queda un spinner infinito.
+  try { await cargarOpcionesFiltros(); } catch (e) { console.warn('Filtros no cargados:', e); }
   routear();
   window.addEventListener('hashchange', routear);
 });
@@ -180,7 +192,12 @@ async function cargarOpcionesFiltros() {
     llenarSelect('#f-estado', o.estados);
     const sr = $('#f-ruta');
     o.rutas.forEach(r => sr.appendChild(new Option(r.codigo + ' · ' + r.nombre, r.codigo)));
-  } catch (e) { console.warn('No se pudieron cargar filtros', e); }
+  } catch (e) {
+    console.warn('No se pudieron cargar filtros', e);
+    // Aviso visible (no bloqueante) en la barra de filtros.
+    const barra = $('#filtros-activos');
+    if (barra) barra.innerHTML = `<span class="chip" style="background:#c62828">⚠️ ${(e && e.message) || 'No se pudieron cargar los filtros'}</span>`;
+  }
 }
 
 function llenarSelect(sel, items) {
