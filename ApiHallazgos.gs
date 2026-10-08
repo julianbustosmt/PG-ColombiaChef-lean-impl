@@ -36,6 +36,12 @@ function apiAgregarEvidencia(datos) {
   return agregarEvidencia(datos);
 }
 
+/** Sube un archivo a Drive y lo registra como evidencia.
+ *  datos: { idHallazgo, tipo, descripcion, nombre, mimeType, base64 } */
+function apiSubirEvidencia(datos) {
+  return subirEvidencia(datos);
+}
+
 /**
  * Datos para el tablero KANBAN de seguimiento: hallazgos agrupados por estado
  * gestionado, respetando los filtros globales. Devuelve columnas en el orden
