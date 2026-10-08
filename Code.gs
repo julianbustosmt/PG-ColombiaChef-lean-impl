@@ -43,6 +43,7 @@ function onOpen() {
     .addItem('Probar notificaciones (correo)', 'probarNotificaciones')
     .addItem('Diagnosticar notificaciones', 'diagnosticarNotificaciones')
     .addItem('Enviar correo de prueba (a mí)', 'enviarCorreoDePrueba')
+    .addItem('Diagnosticar carpeta de Drive', 'diagnosticarDrive')
     .addItem('Crear/sembrar catálogos maestros', 'asegurarCatalogosMaestros')
     .addItem('Sincronizar Form con catálogos', 'sincronizarFormConCatalogo')
     .addSeparator()

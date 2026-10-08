@@ -287,6 +287,105 @@ function agregarEvidencia(datos) {
 }
 
 /**
+ * Sube un archivo (foto) directamente a Drive y lo registra como evidencia.
+ * datos: {
+ *   idHallazgo, tipo, descripcion,
+ *   nombre, mimeType, base64   (datos del archivo desde el frontend)
+ * }
+ * - Crea (o reutiliza) una subcarpeta por hallazgo dentro de la carpeta raíz.
+ * - Opcionalmente deja el archivo visible con enlace (para la galería).
+ * - Reutiliza agregarEvidencia() para registrar la URL en Evidencias_Hallazgo.
+ */
+function subirEvidencia(datos) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta.' };
+  try {
+    var id = limpiar(datos.idHallazgo);
+    if (!id) return { ok: false, error: 'Falta ID de hallazgo.' };
+    if (!datos.base64 || !datos.nombre) return { ok: false, error: 'Archivo no recibido.' };
+
+    var cfg = CONFIG.HALLAZGO_CFG;
+    if (!cfg.DRIVE_CARPETA_RAIZ || cfg.DRIVE_CARPETA_RAIZ.indexOf('PEGAR') !== -1) {
+      return { ok: false, error: 'Falta configurar la carpeta raíz de Drive (DRIVE_CARPETA_RAIZ).' };
+    }
+
+    // Validación de tamaño (base64 ~ 1.37x del binario).
+    var bytesAprox = datos.base64.length * 0.75;
+    if (bytesAprox > cfg.EVIDENCIA_MAX_MB * 1024 * 1024) {
+      return { ok: false, error: 'El archivo supera el máximo de ' + cfg.EVIDENCIA_MAX_MB + ' MB.' };
+    }
+
+    // Carpeta raíz (con mensaje claro si el ID es inválido o sin acceso).
+    var raiz;
+    try {
+      raiz = DriveApp.getFolderById(cfg.DRIVE_CARPETA_RAIZ);
+    } catch (e) {
+      return { ok: false, error: 'No se pudo abrir la carpeta de Drive (ID inválido o sin acceso): ' + e };
+    }
+
+    // Subcarpeta por hallazgo (reutiliza si ya existe).
+    var sub = obtenerOCrearSubcarpeta(raiz, id);
+
+    // Crea el archivo desde base64.
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(datos.base64),
+      datos.mimeType || 'application/octet-stream',
+      datos.nombre
+    );
+    var archivo = sub.createFile(blob);
+
+    // Visibilidad para que se vea en la galería (opcional).
+    if (cfg.EVIDENCIA_VISIBLE_CON_ENLACE) {
+      try {
+        archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (e) { log_('setSharing: ' + e); }
+    }
+
+    var url = archivo.getUrl();
+    // Registra la evidencia (reutiliza la lógica existente).
+    agregarEvidencia({
+      idHallazgo: id,
+      tipo: datos.tipo || 'Adicional',
+      url: url,
+      descripcion: datos.descripcion || datos.nombre
+    });
+
+    return { ok: true, url: url, nombre: datos.nombre };
+  } catch (e) {
+    log_('subirEvidencia error: ' + e);
+    return { ok: false, error: String(e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Devuelve la subcarpeta con el nombre dado dentro de `padre`; la crea si no existe. */
+function obtenerOCrearSubcarpeta(padre, nombre) {
+  var it = padre.getFoldersByName(nombre);
+  return it.hasNext() ? it.next() : padre.createFolder(nombre);
+}
+
+/**
+ * Diagnóstico de la carpeta de Drive. Ejecutar desde el editor para verificar
+ * que el ID configurado es válido y accesible. No sube nada.
+ */
+function diagnosticarDrive() {
+  var cfg = CONFIG.HALLAZGO_CFG;
+  var d = { carpetaRaizId: cfg.DRIVE_CARPETA_RAIZ };
+  try {
+    var raiz = DriveApp.getFolderById(cfg.DRIVE_CARPETA_RAIZ);
+    d.ok = true;
+    d.nombreCarpeta = raiz.getName();
+    d.url = raiz.getUrl();
+  } catch (e) {
+    d.ok = false;
+    d.error = String(e);
+  }
+  log_('diagnosticarDrive: ' + JSON.stringify(d, null, 2));
+  return d;
+}
+
+/**
  * Evidencias de un hallazgo. Combina:
  *   - la evidencia INICIAL del Form (campo Evidencia_Foto del hallazgo), y
  *   - las evidencias registradas en Evidencias_Hallazgo.

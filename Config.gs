@@ -183,7 +183,18 @@ var CONFIG = {
     TIPOS_EVIDENCIA: ['Inicial', 'Corrección', 'Verificación', 'Adicional'],
 
     // Para cerrar un hallazgo se exige comentario de cierre (trazabilidad).
-    EXIGIR_COMENTARIO_CIERRE: true
+    EXIGIR_COMENTARIO_CIERRE: true,
+
+    // ---- Subida directa de fotos a Drive --------------------------------
+    // Carpeta RAÍZ donde se crean subcarpetas por hallazgo (una por ID).
+    // ID tomado de la URL del navegador: drive.google.com/drive/folders/ESTE_ID
+    DRIVE_CARPETA_RAIZ: '1WMaJhr5ZJNAsLrRWXaquGRgqndyUpMmxnc8V1m_FjKEbiudy_Hnw3hC5BZ8U7ZRcoQnuLdv9',
+
+    // Al subir, hacer la foto visible con enlace (para verla en la galería).
+    EVIDENCIA_VISIBLE_CON_ENLACE: true,
+
+    // Tamaño máximo por archivo (MB). Protege de subidas accidentales enormes.
+    EVIDENCIA_MAX_MB: 15
   },
 
   // ---- Notificaciones (Fase 6) -----------------------------------------

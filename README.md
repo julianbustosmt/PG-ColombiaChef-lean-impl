@@ -195,7 +195,7 @@ Hallazgo   → Historial       (Historial_Hallazgo, 1:N)
 | KPIs de hallazgos ampliados | ✅ Implementado |
 | Tolerancia a datos históricos (sin estado/responsable/evidencia) | ✅ Implementado |
 | Agregar evidencias por **URL** de Drive | ✅ Implementado |
-| **Subida directa de archivos** desde la app (sin pegar URL) | ⏳ Pendiente (arquitectura lista: tabla `Evidencias_Hallazgo` + `agregarEvidencia`) |
+| **Subida directa de archivos** desde la app (sin pegar URL) | ✅ Implementado (`subirEvidencia`: sube a Drive, subcarpeta por hallazgo, visible con enlace). Requiere scope `drive` y `DRIVE_CARPETA_RAIZ` en Config. |
 
 ### Robustez y notificaciones (bloques B y A)
 

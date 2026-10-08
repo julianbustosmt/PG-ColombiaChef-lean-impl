@@ -1636,7 +1636,12 @@ function pintarFichaHallazgo(d) {
 
     <div class="ftab-panel" data-panel="evid" hidden>
       <div class="toolbar"><h3 style="margin:0">Evidencias</h3>
-        <button class="btn" id="btn-add-evid">+ Agregar evidencia (URL)</button></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btn-subir-evid">📎 Subir foto</button>
+          <button class="btn" id="btn-add-evid">🔗 Agregar por URL</button>
+        </div></div>
+      <input type="file" id="ev-file" accept="image/*" style="display:none">
+      <div id="ev-subida-msg" class="muted" style="font-size:12px;margin-bottom:8px"></div>
       ${galeria}
     </div>
 
@@ -1721,6 +1726,54 @@ function pintarFichaHallazgo(d) {
     const r = await api('apiAgregarEvidencia', { idHallazgo: h.idHallazgo, url, tipo, descripcion: desc });
     if (!r.ok) { alert(r.error); return; } recargar();
   });
+
+  // Subida directa de foto a Drive.
+  const btnSubir = $('#btn-subir-evid');
+  const inputFile = $('#ev-file');
+  if (btnSubir && inputFile) {
+    btnSubir.addEventListener('click', () => inputFile.click());
+    inputFile.addEventListener('change', () => subirFotoEvidencia(h.idHallazgo, inputFile, recargar));
+  }
+}
+
+/* Lee el archivo seleccionado, lo convierte a base64 y lo sube vía backend. */
+function subirFotoEvidencia(idHallazgo, inputFile, onOk) {
+  const file = inputFile.files && inputFile.files[0];
+  if (!file) return;
+  const msg = $('#ev-subida-msg');
+
+  // Validación de tamaño en cliente (coherente con el backend).
+  const maxMB = 15;
+  if (file.size > maxMB * 1024 * 1024) {
+    msg.innerHTML = `<span style="color:#ef9a9a">El archivo supera ${maxMB} MB.</span>`;
+    inputFile.value = ''; return;
+  }
+
+  const tipo = prompt('Tipo de evidencia (Inicial / Corrección / Verificación / Adicional):', 'Corrección') || 'Adicional';
+  msg.textContent = 'Subiendo foto…';
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    // reader.result = 'data:<mime>;base64,<datos>' -> extraemos solo los datos.
+    const base64 = String(reader.result).split(',')[1];
+    try {
+      const r = await api('apiSubirEvidencia', {
+        idHallazgo: idHallazgo,
+        tipo: tipo,
+        descripcion: file.name,
+        nombre: file.name,
+        mimeType: file.type || 'image/jpeg',
+        base64: base64
+      });
+      if (!r.ok) { msg.innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; }
+      msg.innerHTML = '✅ Foto subida.';
+      if (onOk) onOk();
+    } catch (e) {
+      msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`;
+    }
+  };
+  reader.onerror = () => { msg.innerHTML = '<span style="color:#ef9a9a">No se pudo leer el archivo.</span>'; };
+  reader.readAsDataURL(file);
 }
 
 /* Convierte una URL de Google Drive en URL de miniatura visualizable.
