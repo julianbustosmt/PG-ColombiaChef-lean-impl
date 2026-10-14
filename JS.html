@@ -1653,13 +1653,7 @@ function pintarFichaHallazgo(d) {
     </div>
 
     <div class="ftab-panel" data-panel="evid" hidden>
-      <div class="toolbar"><h3 style="margin:0">Evidencias</h3>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary" id="btn-subir-evid">📎 Subir foto</button>
-          <button class="btn" id="btn-add-evid">🔗 Agregar por URL</button>
-        </div></div>
-      <input type="file" id="ev-file" accept="image/*" style="display:none">
-      <div id="ev-subida-msg" class="muted" style="font-size:12px;margin-bottom:8px"></div>
+      <h3 style="margin:0 0 8px">Evidencias</h3>
       ${galeria}
     </div>
 
@@ -1675,7 +1669,12 @@ function pintarFichaHallazgo(d) {
           <hr style="border-color:var(--line);margin:14px 0">
           <h3>Cierre con trazabilidad</h3>
           <input id="g-cierre-com" class="search-box" style="width:100%" placeholder="Comentario de cierre (obligatorio)">
-          <input id="g-cierre-url" class="search-box" style="width:100%;margin-top:8px" placeholder="URL evidencia de cierre (opcional)">
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <input id="g-cierre-url" class="search-box" style="flex:1" placeholder="URL evidencia de cierre (opcional)">
+            <button class="btn" id="btn-cierre-foto" title="Subir foto como evidencia de cierre">📎 Foto</button>
+          </div>
+          <input type="file" id="g-cierre-file" accept="image/*" style="display:none">
+          <div id="g-cierre-foto-msg" class="muted" style="font-size:11px;margin-top:4px"></div>
           <div style="margin-top:8px;display:flex;gap:8px">
             <button class="btn btn-primary" id="btn-cerrar">✔ Cerrar hallazgo</button>
             <button class="btn" id="btn-reabrir">↺ Reabrir</button>
@@ -1719,13 +1718,75 @@ function pintarFichaHallazgo(d) {
   const recargar = () => abrirDetalleHallazgo(h.idHallazgo);
   const msg = () => $('#g-msg');
 
+  // --- Cierre con trazabilidad: foto como evidencia de cierre (Opción B) ---
+  // El botón de clip selecciona una imagen que queda PENDIENTE; al pulsar
+  // "Cerrar hallazgo" se sube a Drive y su URL se usa como evidencia de cierre.
+  var fotoCierrePendiente = null;
+  const btnFoto = $('#btn-cierre-foto');
+  const fileFoto = $('#g-cierre-file');
+  const msgFoto = () => $('#g-cierre-foto-msg');
+  const urlCierre = () => $('#g-cierre-url');
+  if (btnFoto && fileFoto) {
+    btnFoto.addEventListener('click', () => fileFoto.click());
+    fileFoto.addEventListener('change', () => {
+      const f = fileFoto.files && fileFoto.files[0];
+      if (!f) { fotoCierrePendiente = null; return; }
+      const maxMB = 15;
+      if (f.size > maxMB * 1024 * 1024) {
+        msgFoto().innerHTML = `<span style="color:#ef9a9a">El archivo supera ${maxMB} MB.</span>`;
+        fileFoto.value = ''; fotoCierrePendiente = null; return;
+      }
+      fotoCierrePendiente = f;
+      // Al elegir foto se ignora la URL manual (la foto tiene prioridad).
+      if (urlCierre()) { urlCierre().value = ''; urlCierre().disabled = true; }
+      msgFoto().innerHTML = `📎 Foto lista: ${f.name}. Se subirá al cerrar el hallazgo.`;
+    });
+  }
+
+  // Lee un File, lo sube como evidencia y devuelve la URL de Drive.
+  const subirFotoCierre = (idHallazgo, file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = String(reader.result).split(',')[1];
+      try {
+        const r = await api('apiSubirEvidencia', {
+          idHallazgo: idHallazgo,
+          tipo: 'Verificación',
+          descripcion: 'Evidencia de cierre: ' + file.name,
+          nombre: file.name,
+          mimeType: file.type || 'image/jpeg',
+          base64: base64
+        });
+        if (!r.ok) { reject(new Error(r.error || 'No se pudo subir la foto.')); return; }
+        resolve(r.url);
+      } catch (e) { reject(e); }
+    };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
+    reader.readAsDataURL(file);
+  });
+
   $('#btn-estado') && $('#btn-estado').addEventListener('click', async () => {
     const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: h.idHallazgo, nuevoEstado: $('#g-estado').value, comentario: $('#g-estado-com').value });
     if (!r.ok) { msg().textContent = r.error; return; } recargar();
   });
   $('#btn-cerrar') && $('#btn-cerrar').addEventListener('click', async () => {
-    const r = await api('apiCerrarHallazgo', { idHallazgo: h.idHallazgo, comentario: $('#g-cierre-com').value, evidenciaUrl: $('#g-cierre-url').value });
-    if (!r.ok) { msg().innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; } recargar();
+    const btn = $('#btn-cerrar');
+    btn.disabled = true;
+    try {
+      // Si hay foto pendiente, se sube primero y su URL es la evidencia de cierre.
+      let evidenciaUrl = $('#g-cierre-url').value;
+      if (fotoCierrePendiente) {
+        msgFoto().textContent = 'Subiendo foto…';
+        evidenciaUrl = await subirFotoCierre(h.idHallazgo, fotoCierrePendiente);
+        msgFoto().innerHTML = '✅ Foto subida.';
+      }
+      const r = await api('apiCerrarHallazgo', { idHallazgo: h.idHallazgo, comentario: $('#g-cierre-com').value, evidenciaUrl: evidenciaUrl });
+      if (!r.ok) { msg().innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; btn.disabled = false; return; }
+      recargar();
+    } catch (e) {
+      msgFoto().innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`;
+      btn.disabled = false;
+    }
   });
   $('#btn-reabrir') && $('#btn-reabrir').addEventListener('click', async () => {
     const r = await api('apiReabrirHallazgo', { idHallazgo: h.idHallazgo, comentario: '' });
@@ -1736,67 +1797,6 @@ function pintarFichaHallazgo(d) {
     const r = await api('apiAgregarAccion', { idHallazgo: h.idHallazgo, descripcion: $('#a-desc').value, responsable: $('#a-resp').value, fechaLimite: $('#a-limite').value, comentario: $('#a-com').value });
     if (!r.ok) { msg().textContent = r.error; return; } recargar();
   });
-  $('#btn-add-evid') && $('#btn-add-evid').addEventListener('click', async () => {
-    const url = prompt('Pega la URL de la evidencia (Google Drive):', '');
-    if (!url) return;
-    const tipo = prompt('Tipo (Inicial / Corrección / Verificación / Adicional):', 'Adicional') || 'Adicional';
-    const desc = prompt('Descripción (opcional):', '') || '';
-    const r = await api('apiAgregarEvidencia', { idHallazgo: h.idHallazgo, url, tipo, descripcion: desc });
-    if (!r.ok) { alert(r.error); return; } recargar();
-  });
-
-  // Subida directa de foto a Drive.
-  const btnSubir = $('#btn-subir-evid');
-  const inputFile = $('#ev-file');
-  if (btnSubir && inputFile) {
-    btnSubir.addEventListener('click', () => inputFile.click());
-    inputFile.addEventListener('change', () => subirFotoEvidencia(h.idHallazgo, inputFile, recargar));
-  }
-}
-
-/* Lee el archivo seleccionado, lo convierte a base64 y lo sube vía backend. */
-function subirFotoEvidencia(idHallazgo, inputFile, onOk) {
-  const file = inputFile.files && inputFile.files[0];
-  if (!file) return;
-  const msg = $('#ev-subida-msg');
-
-  // Validación de tamaño en cliente (coherente con el backend).
-  const maxMB = 15;
-  if (file.size > maxMB * 1024 * 1024) {
-    msg.innerHTML = `<span style="color:#ef9a9a">El archivo supera ${maxMB} MB.</span>`;
-    inputFile.value = ''; return;
-  }
-
-  const tipo = prompt('Tipo de evidencia (Inicial / Corrección / Verificación / Adicional):', 'Corrección') || 'Adicional';
-  msg.textContent = 'Subiendo foto…';
-
-  const reader = new FileReader();
-  reader.onload = async () => {
-    // reader.result tiene el formato data:MIME;base64,DATOS y tomamos DATOS.
-    // (OJO: no usar signos de menor/mayor que aquí; el sanitizador de la Web
-    //  App de Apps Script los interpreta como etiquetas HTML y rompe la carga.)
-    const base64 = String(reader.result).split(',')[1];
-    try {
-      const r = await api('apiSubirEvidencia', {
-        idHallazgo: idHallazgo,
-        tipo: tipo,
-        descripcion: file.name,
-        nombre: file.name,
-        mimeType: file.type || 'image/jpeg',
-        base64: base64
-      });
-      if (!r.ok) { msg.innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; }
-      msg.innerHTML = '✅ Foto subida.';
-      if (onOk) onOk();
-    } catch (e) {
-      msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`;
-    }
-  };
-  // NOTA: usar backtick (no comilla simple). El sanitizador de la Web App de
-  // Apps Script rompe la carga si un <span>...</span> literal completo va en
-  // una cadena de comilla simple. Con template literal (backtick) funciona.
-  reader.onerror = () => { msg.innerHTML = `<span style="color:#ef9a9a">No se pudo leer el archivo.</span>`; };
-  reader.readAsDataURL(file);
 }
 
 /* Convierte una URL de Google Drive en URL de miniatura visualizable.
