@@ -4,6 +4,22 @@
    Router por hash + estado de filtros + render con Chart.js
    ============================================================ */
 
+/* Sello de diagnóstico: barra verde arriba si el JS parsea y arranca.
+   Captura cualquier error de arranque y lo muestra en pantalla. */
+(function () {
+  var BUILD = 'FIX-DRIVE-1';
+  try {
+    var s = document.createElement('div');
+    s.textContent = 'JS OK: ' + BUILD;
+    s.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#2e7d32;color:#fff;font:13px monospace;text-align:center;padding:4px';
+    (document.body || document.documentElement).appendChild(s);
+  } catch (e) {}
+  window.addEventListener('error', function (ev) {
+    var v = document.getElementById('view') || document.body;
+    if (v) v.innerHTML = '<div style="font:14px monospace;color:#c62828;background:#fff;padding:16px;border:2px solid #c62828;margin:40px 12px 12px;white-space:pre-wrap">ERROR (' + BUILD + '): ' + (ev.message || '') + '\n' + (ev.filename || '') + ':' + (ev.lineno || '?') + '</div>';
+  });
+})();
+
 const App = {
   filtros: {},          // estado global de filtros
   charts: {},           // instancias Chart.js vivas (para destruir al re-render)
