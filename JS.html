@@ -1792,7 +1792,10 @@ function subirFotoEvidencia(idHallazgo, inputFile, onOk) {
       msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`;
     }
   };
-  reader.onerror = () => { msg.innerHTML = '<span style="color:#ef9a9a">No se pudo leer el archivo.</span>'; };
+  // NOTA: usar backtick (no comilla simple). El sanitizador de la Web App de
+  // Apps Script rompe la carga si un <span>...</span> literal completo va en
+  // una cadena de comilla simple. Con template literal (backtick) funciona.
+  reader.onerror = () => { msg.innerHTML = `<span style="color:#ef9a9a">No se pudo leer el archivo.</span>`; };
   reader.readAsDataURL(file);
 }
 
