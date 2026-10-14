@@ -10,36 +10,6 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
-  // DIAGNÓSTICO ?mitad=1|2|3|4: sirve el Index+CSS pero con el JS recortado a
-  // un cuarto/mitad, para localizar por bisección el fragmento que rompe el
-  // RENDERIZADOR (error "style"). Si en una porción aparece el error "style",
-  // el fragmento culpable está en ella; si aparece otro error (p.ej. "end of
-  // input"), esa porción está limpia (solo truncada).
-  if (e && e.parameter && e.parameter.mitad) {
-    var jsFull = HtmlService.createHtmlOutputFromFile('JS').getContent();
-    var cuerpo = jsFull.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
-    var L = cuerpo.split('\n');
-    var n = L.length;
-    var hasta = {
-      '1': Math.floor(n * 0.25), '2': Math.floor(n * 0.50),
-      '3': Math.floor(n * 0.75), '4': n
-    }[e.parameter.mitad] || n;
-    var frag = L.slice(0, hasta).join('\n');
-    // Página mínima (sin Index/CSS) con SOLO el fragmento del JS, para que si
-    // el error "style" del renderizador aparece, sea por ese fragmento.
-    // Un capturador en bloque aparte muestra el error de parseo en pantalla.
-    return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html><body>' +
-      '<p id="r">mitad=' + e.parameter.mitad + ' hasta línea ' + hasta + ' — si ves solo esto SIN error abajo, esta porción está LIMPIA</p>' +
-      '<div id="err"></div>' +
-      '<scr' + 'ipt>window.addEventListener("error",function(ev){' +
-      'document.getElementById("err").innerHTML="<b style=color:red>ERROR: "+ev.message+" (línea "+ev.lineno+")</b>";});</scr' + 'ipt>' +
-      '<scr' + 'ipt>\n' + frag + '\n</scr' + 'ipt></body></html>'
-    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
-  // Composición estándar de Apps Script: el Index es una plantilla que
-  // incluye CSS y JS con <?!= include() ?>.
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
@@ -49,57 +19,6 @@ function doGet(e) {
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-
-/**
- * AUTORIZACIÓN TOTAL. Ejecutar desde el menú (o el editor) UNA vez para que
- * Google solicite TODOS los permisos que la app necesita, de golpe.
- * Toca cada servicio para forzar su scope. NO lleva try/catch: si falta un
- * permiso, el error se propaga y Apps Script muestra la pantalla de
- * autorización con todos los scopes pendientes.
- */
-function autorizarTodo() {
-  var reporte = [];
-
-  // Sheets (spreadsheets.currentonly)
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  reporte.push('Sheets: ' + ss.getName());
-
-  // Drive
-  var raiz = DriveApp.getRootFolder();
-  reporte.push('Drive: ' + raiz.getName());
-
-  // Calendar
-  var cal = CalendarApp.getDefaultCalendar();
-  reporte.push('Calendar: ' + cal.getName());
-
-  // Gmail / envío de correo (cuota)
-  reporte.push('Mail cuota: ' + MailApp.getRemainingDailyQuota());
-
-  // Forms (abre el form configurado si existe)
-  try {
-    if (CONFIG.FORM_INSPECCION && CONFIG.FORM_INSPECCION.FORM_ID) {
-      var f = FormApp.openById(CONFIG.FORM_INSPECCION.FORM_ID);
-      reporte.push('Form: ' + f.getTitle());
-    }
-  } catch (e) { reporte.push('Form: (revisar ID) ' + e); }
-
-  // Identidad / email
-  reporte.push('Usuario: ' + Session.getActiveUser().getEmail());
-
-  // Properties
-  PropertiesService.getScriptProperties().getProperty('x');
-  reporte.push('Properties: OK');
-
-  var msg = 'Permisos verificados:\n\n' + reporte.join('\n');
-  Logger.log(msg);
-  try { SpreadsheetApp.getUi().alert('✅ Autorización completa', msg, SpreadsheetApp.getUi().ButtonSet.OK); } catch (e) {}
-  return msg;
-}
-
-/** Ping para el modo diagnóstico: confirma que el backend responde. */
-function pingBackend() {
-  return 'ok ' + (CONFIG && CONFIG.VERSION ? 'v' + CONFIG.VERSION : '');
 }
 
 /** Incluye el contenido de otro archivo HTML (CSS.html, JS.html). */
@@ -114,8 +33,6 @@ function include(nombre) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('⚙️ Gestión 5S')
-    .addItem('✅ Autorizar TODOS los permisos', 'autorizarTodo')
-    .addSeparator()
     .addItem('Reconstruir tablas (ETL)', 'reconstruirTodo')
     .addItem('Instalar triggers', 'instalarTriggers')
     .addSeparator()
@@ -126,7 +43,6 @@ function onOpen() {
     .addItem('Probar notificaciones (correo)', 'probarNotificaciones')
     .addItem('Diagnosticar notificaciones', 'diagnosticarNotificaciones')
     .addItem('Enviar correo de prueba (a mí)', 'enviarCorreoDePrueba')
-    .addItem('Autorizar Google Drive', 'autorizarDrive')
     .addItem('Diagnosticar carpeta de Drive', 'diagnosticarDrive')
     .addItem('Crear/sembrar catálogos maestros', 'asegurarCatalogosMaestros')
     .addItem('Sincronizar Form con catálogos', 'sincronizarFormConCatalogo')
