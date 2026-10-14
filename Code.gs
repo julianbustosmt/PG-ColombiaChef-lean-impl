@@ -56,6 +56,9 @@ function doGet(e) {
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
   tpl.version = CONFIG.VERSION;
+  // Diagnóstico: ?parte=soloindex sirve el Index SIN incluir CSS/JS, para
+  // aislar si el markup del Index (por template) rompe el sanitizador.
+  tpl.diagSoloIndex = !!(e && e.parameter && e.parameter.parte === 'soloindex');
 
   return tpl.evaluate()
     .setTitle(CONFIG.APP_TITLE)
