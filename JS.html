@@ -149,10 +149,12 @@ function bindUI() {
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('#modal').classList.add('hidden'); });
 
   // Navegación del sidebar.
-  // En una Web App de Apps Script el contenido vive dentro de un <iframe>
-  // sandbox; un <a href="#..."> con base target="_top" intentaría navegar la
+  // En una Web App de Apps Script el contenido vive dentro de un iframe
+  // sandbox; un enlace de ancla con base target _top intentaría navegar la
   // ventana completa (y "sale" del iframe). Interceptamos el clic y cambiamos
   // la vista por JS, igual que hacen las tarjetas KPI (que sí funcionan).
+  // (OJO: no escribir signos de menor/mayor que en comentarios; el sanitizador
+  //  de la Web App los toma como etiquetas HTML y rompe la carga del script.)
   $$('.nav-item').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
@@ -1754,7 +1756,9 @@ function subirFotoEvidencia(idHallazgo, inputFile, onOk) {
 
   const reader = new FileReader();
   reader.onload = async () => {
-    // reader.result = 'data:<mime>;base64,<datos>' -> extraemos solo los datos.
+    // reader.result tiene el formato data:MIME;base64,DATOS y tomamos DATOS.
+    // (OJO: no usar signos de menor/mayor que aquí; el sanitizador de la Web
+    //  App de Apps Script los interpreta como etiquetas HTML y rompe la carga.)
     const base64 = String(reader.result).split(',')[1];
     try {
       const r = await api('apiSubirEvidencia', {
