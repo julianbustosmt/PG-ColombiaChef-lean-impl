@@ -10,6 +10,23 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
+  // --- MODO DIAGNÓSTICO: abre la URL con ?test=1 para una página mínima.
+  // Si ?test=1 CARGA pero la app normal NO, el problema está en el contenido
+  // (Index/CSS/JS). Si ?test=1 TAMPOCO carga, el problema es despliegue/permisos.
+  if (e && e.parameter && e.parameter.test === '1') {
+    return HtmlService.createHtmlOutput(
+      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px">' +
+      '<h2>✅ Prueba OK</h2><p>La Web App sirve HTML correctamente.</p>' +
+      '<p id="r">Probando backend…</p>' +
+      '<script>google.script.run.withSuccessHandler(function(v){' +
+      'document.getElementById("r").textContent="Backend OK: "+v;})' +
+      '.withFailureHandler(function(err){' +
+      'document.getElementById("r").textContent="Backend ERROR: "+err;})' +
+      '.pingBackend();</script>' +
+      '</body></html>'
+    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
@@ -19,6 +36,11 @@ function doGet(e) {
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/** Ping para el modo diagnóstico: confirma que el backend responde. */
+function pingBackend() {
+  return 'ok ' + (CONFIG && CONFIG.VERSION ? 'v' + CONFIG.VERSION : '');
 }
 
 /** Incluye el contenido de otro archivo HTML (CSS.html, JS.html). */
