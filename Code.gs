@@ -21,6 +21,30 @@ function doGet(e) {
   // funcionó en todas las pruebas de diagnóstico (?parte=cssjs).
   var html = HtmlService.createHtmlOutputFromFile('Index').getContent();
 
+  // DIAGNÓSTICO ?half=1|2: sirve solo la 1ª o 2ª mitad del JS (envuelta en un
+  // <script> válido) para localizar en qué mitad está el fragmento que rompe
+  // el renderizador. Si una mitad CARGA (dashboard intenta pintar o error de
+  // 'función no definida') y la otra deja 'Cargando…' con el error 'style',
+  // el problema está en esa mitad.
+  if (e && e.parameter && e.parameter.half) {
+    var jsCrudo = HtmlService.createHtmlOutputFromFile('JS').getContent();
+    var cuerpo = jsCrudo.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
+    var lineas = cuerpo.split('\n');
+    var mitad = Math.floor(lineas.length / 2);
+    // Servimos SOLO las líneas de la mitad pedida (el resto se omite como
+    // texto). Si el error 'style' del renderizador aparece en una mitad y no
+    // en la otra, el fragmento culpable está en esa mitad.
+    var corte = (e.parameter.half === '1')
+      ? lineas.slice(0, mitad)
+      : lineas.slice(mitad);
+    var jsParcial = '<scr' + 'ipt>\n' + corte.join('\n') + '\n</scr' + 'ipt>';
+    var htmlDiag = html.split('{{CSS}}').join('').split('{{JS}}').join(jsParcial)
+      .split('{{APP_TITLE}}').join('App').split('{{APP_SUBTITLE}}').join('')
+      .split('{{VERSION}}').join('');
+    return HtmlService.createHtmlOutput(htmlDiag)
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   // Reemplazo de marcadores {{...}} por su contenido real. Usamos marcadores
   // de texto plano (no scriptlets <?= ?>) porque createHtmlOutputFromFile NO
   // procesa scriptlets. Y servimos con createHtmlOutput (no template.evaluate),
