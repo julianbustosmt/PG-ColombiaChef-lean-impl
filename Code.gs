@@ -10,31 +10,15 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
-  // DIAGNÓSTICO ?mitad=1|2|3|4: sirve el Index+CSS pero con el JS recortado a
-  // un cuarto/mitad, para localizar por bisección el fragmento que rompe el
-  // RENDERIZADOR (error "style"). Si en una porción aparece el error "style",
-  // el fragmento culpable está en ella; si aparece otro error (p.ej. "end of
-  // input"), esa porción está limpia (solo truncada).
-  if (e && e.parameter && e.parameter.mitad) {
-    var jsFull = HtmlService.createHtmlOutputFromFile('JS').getContent();
-    var cuerpo = jsFull.replace(/^\s*<script>/, '').replace(/<\/script>\s*$/, '');
-    var L = cuerpo.split('\n');
-    var n = L.length;
-    var hasta = {
-      '1': Math.floor(n * 0.25), '2': Math.floor(n * 0.50),
-      '3': Math.floor(n * 0.75), '4': n
-    }[e.parameter.mitad] || n;
-    var frag = L.slice(0, hasta).join('\n');
-    // Página mínima (sin Index/CSS) con SOLO el fragmento del JS, para que si
-    // el error "style" del renderizador aparece, sea por ese fragmento.
-    // Un capturador en bloque aparte muestra el error de parseo en pantalla.
+  // Diagnóstico de sincronización: ?v=check confirma que /exec sirve ESTE
+  // código (la versión actual del repo) y no un despliegue antiguo en caché.
+  if (e && e.parameter && e.parameter.v === 'check') {
     return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html><body>' +
-      '<p id="r">mitad=' + e.parameter.mitad + ' hasta línea ' + hasta + ' — si ves solo esto SIN error abajo, esta porción está LIMPIA</p>' +
-      '<div id="err"></div>' +
-      '<scr' + 'ipt>window.addEventListener("error",function(ev){' +
-      'document.getElementById("err").innerHTML="<b style=color:red>ERROR: "+ev.message+" (línea "+ev.lineno+")</b>";});</scr' + 'ipt>' +
-      '<scr' + 'ipt>\n' + frag + '\n</scr' + 'ipt></body></html>'
+      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:24px">' +
+      '<h2>✅ Despliegue sincronizado</h2>' +
+      '<p>Esta Web App está sirviendo la versión <b>' + CONFIG.VERSION + '</b> del código.</p>' +
+      '<p>Archivos del proyecto correctos. Quita <code>?v=check</code> de la URL para abrir la app.</p>' +
+      '</body></html>'
     ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
