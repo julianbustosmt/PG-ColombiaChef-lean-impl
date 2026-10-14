@@ -3,11 +3,11 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <title>{{APP_TITLE}}</title>
+  <title><?= appTitle ?></title>
   <!-- Chart.js + plugin matrix (heatmaps) por CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
-  {{CSS}}
+  <?!= include('CSS'); ?>
 </head>
 <body>
   <div id="app">
@@ -17,8 +17,8 @@
       <div class="brand">
         <div class="brand-logo">5S</div>
         <div class="brand-text">
-          <strong>{{APP_TITLE}}</strong>
-          <span>{{APP_SUBTITLE}}</span>
+          <strong><?= appTitle ?></strong>
+          <span><?= appSubtitle ?></span>
         </div>
       </div>
       <nav class="menu">
@@ -35,7 +35,7 @@
         <a href="javascript:void(0)" class="nav-item" data-view="tendencias">📈 Tendencias</a>
         <a href="javascript:void(0)" class="nav-item" data-view="catalogos">📇 Catálogos</a>
       </nav>
-      <div class="sidebar-foot">v{{VERSION}}</div>
+      <div class="sidebar-foot">v<?= version ?></div>
     </aside>
 
     <!-- ====================== MAIN ====================== -->
@@ -61,17 +61,6 @@
       <section id="view" class="view">
         <div class="loader">Cargando…</div>
       </section>
-
-      <!-- Capturador de errores en SU PROPIO bloque <script>: si el script
-           principal falla al PARSEAR, este (que ya se ejecutó) lo detecta y
-           lo muestra en pantalla. -->
-      <script>
-        window.addEventListener('error', function (ev) {
-          var v = document.getElementById('view');
-          if (v) v.innerHTML = '<div style="padding:24px;color:#c62828;font-family:monospace;white-space:pre-wrap">ERROR: ' +
-            (ev.message || '') + '\n' + (ev.filename || '') + ' línea ' + (ev.lineno || '?') + ' col ' + (ev.colno || '?') + '</div>';
-        });
-      </script>
     </main>
   </div>
 
@@ -83,6 +72,6 @@
     </div>
   </div>
 
-  {{JS}}
+  <?!= include('JS'); ?>
 </body>
 </html>
