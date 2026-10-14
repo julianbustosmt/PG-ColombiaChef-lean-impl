@@ -27,6 +27,24 @@ function doGet(e) {
     ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
+  // Diagnóstico por partes: sirve SOLO el contenido indicado para aislar
+  // cuál archivo rompe el sanitizador.  ?parte=css  |  ?parte=js
+  if (e && e.parameter && e.parameter.parte) {
+    var cual = e.parameter.parte;
+    var cuerpo = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
+    cuerpo += '<h2>Diagnóstico: ' + cual + '</h2>';
+    try {
+      if (cual === 'css') cuerpo += include('CSS');
+      else if (cual === 'js') cuerpo += include('JS');
+      cuerpo += '<p>Si ves esto, "' + cual + '" NO rompe el sanitizador.</p>';
+    } catch (err) {
+      cuerpo += '<p>Error al incluir ' + cual + ': ' + err + '</p>';
+    }
+    cuerpo += '</body></html>';
+    return HtmlService.createHtmlOutput(cuerpo)
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
