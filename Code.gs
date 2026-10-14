@@ -59,6 +59,9 @@ function doGet(e) {
   // Diagnóstico: ?parte=soloindex sirve el Index SIN incluir CSS/JS, para
   // aislar si el markup del Index (por template) rompe el sanitizador.
   tpl.diagSoloIndex = !!(e && e.parameter && e.parameter.parte === 'soloindex');
+  // ?parte=sinjs: Index + CSS pero SIN el JS (para ver si la combinación
+  // Index+CSS por template está bien y el problema es sumar el JS).
+  tpl.diagSinJS = !!(e && e.parameter && e.parameter.parte === 'sinjs');
 
   return tpl.evaluate()
     .setTitle(CONFIG.APP_TITLE)
