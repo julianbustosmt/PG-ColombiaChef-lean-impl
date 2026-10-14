@@ -61,6 +61,17 @@
       <section id="view" class="view">
         <div class="loader">Cargando…</div>
       </section>
+
+      <!-- Capturador de errores en SU PROPIO bloque <script>: si el script
+           principal falla al PARSEAR, este (que ya se ejecutó) lo detecta y
+           lo muestra en pantalla. -->
+      <script>
+        window.addEventListener('error', function (ev) {
+          var v = document.getElementById('view');
+          if (v) v.innerHTML = '<div style="padding:24px;color:#c62828;font-family:monospace;white-space:pre-wrap">ERROR: ' +
+            (ev.message || '') + '\n' + (ev.filename || '') + ' línea ' + (ev.lineno || '?') + ' col ' + (ev.colno || '?') + '</div>';
+        });
+      </script>
     </main>
   </div>
 
@@ -72,7 +83,6 @@
     </div>
   </div>
 
-  <!-- El JS se añade desde doGet() con append(), NO aquí, para evitar que el
-       motor de plantillas reprocese su contenido y rompa el sanitizador. -->
+  <?!= include('JS'); ?>
 </body>
 </html>

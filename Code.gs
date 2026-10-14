@@ -20,16 +20,10 @@ function doGet(e) {
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
   tpl.version = CONFIG.VERSION;
 
-  var salida = tpl.evaluate()
+  return tpl.evaluate()
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-
-  // El contenido de JS.html (incluye sus etiquetas <script>) se agrega como
-  // bloque ya resuelto, sin pasar por el evaluador de plantillas.
-  salida.append(HtmlService.createHtmlOutputFromFile('JS').getContent());
-
-  return salida;
 }
 
 /** Ping para el modo diagnóstico: confirma que el backend responde. */
