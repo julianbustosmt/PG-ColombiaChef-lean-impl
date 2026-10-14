@@ -4,6 +4,21 @@
    Router por hash + estado de filtros + render con Chart.js
    ============================================================ */
 
+/* Capturador GLOBAL de errores: si algo falla (incluso al arrancar), muestra
+   el error en pantalla en lugar de dejar 'Cargando…'. Diagnóstico visible. */
+(function () {
+  function pintarError(msg) {
+    var v = document.getElementById('view');
+    if (v) v.innerHTML = '<div style="padding:24px;color:#ef9a9a;font-family:monospace;white-space:pre-wrap">⚠️ Error de arranque:\n' + msg + '</div>';
+  }
+  window.addEventListener('error', function (ev) {
+    pintarError((ev.message || 'error') + '\n' + (ev.filename || '') + ':' + (ev.lineno || ''));
+  });
+  window.addEventListener('unhandledrejection', function (ev) {
+    pintarError('Promesa rechazada: ' + ((ev.reason && ev.reason.message) || ev.reason || 'desconocido'));
+  });
+})();
+
 const App = {
   filtros: {},          // estado global de filtros
   charts: {},           // instancias Chart.js vivas (para destruir al re-render)
