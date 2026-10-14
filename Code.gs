@@ -10,11 +10,19 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
-  // Evalúa SOLO el Index como plantilla (procesa los <?= ?> y el include del
-  // CSS). El JS NO se inyecta por el template: se añade DESPUÉS con append,
-  // para que el motor de plantillas de Apps Script no reprocese su contenido
-  // (eso rompía el sanitizador cuando el documento completo era grande:
-  //  "Failed to execute 'write' on 'Document': Unexpected identifier 'style'").
+  // Prueba 1: página mínima con un script trivial. Si ESTE script se ejecuta
+  // (ves "script OK"), entonces los <script> SÍ corren en tu Web App y el
+  // problema está en el contenido grande. Si NO ("script NO ejecutó"), el
+  // problema es de autorización/entorno (los scripts no corren).
+  if (e && e.parameter && e.parameter.test === 'script') {
+    return HtmlService.createHtmlOutput(
+      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px">' +
+      '<p id="x">script NO ejecutó (si ves esto, los scripts no corren)</p>' +
+      '<scr' + 'ipt>document.getElementById("x").textContent="✅ script OK: los scripts SÍ se ejecutan";</scr' + 'ipt>' +
+      '</body></html>'
+    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
