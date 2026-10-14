@@ -265,7 +265,16 @@ function routear() {
     mapa: renderMapa,
     tendencias: renderTendencias
   };
-  (rutas[vista] || renderDashboard)(param);
+  // Protección global: si la vista lanza (síncrono o promesa rechazada), se
+  // muestra el error en pantalla en vez de dejar el spinner 'Cargando…'.
+  try {
+    const resultado = (rutas[vista] || renderDashboard)(param);
+    if (resultado && typeof resultado.catch === 'function') {
+      resultado.catch(e => mostrarError(e));
+    }
+  } catch (e) {
+    mostrarError(e);
+  }
 }
 
 /* ============================================================
