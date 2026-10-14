@@ -10,18 +10,8 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
-  // Sello de versión para confirmar que /exec sirve el código ACTUAL.
-  // Abre la URL con ?v=check -> debe mostrar "SELLO-34e89c3-OK".
-  if (e && e.parameter && e.parameter.v === 'check') {
-    return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px;font-size:20px">' +
-      'SELLO-34e89c3-OK<br>Si ves esto, /exec SÍ tiene el código actual.' +
-      '</body></html>'
-    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
-  // Composición estándar de Apps Script (misma que la versión funcional):
-  // el Index es una plantilla que incluye CSS y JS con <?!= include() ?>.
+  // Composición estándar de Apps Script: el Index es una plantilla que
+  // incluye CSS y JS con <?!= include() ?>.
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;

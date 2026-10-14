@@ -9,8 +9,58 @@ const App = {
   charts: {},           // instancias Chart.js vivas (para destruir al re-render)
   vistaActual: 'dashboard',
   ruta: 'dashboard',    // fuente de verdad de navegación (independiente del hash)
-  cal: {}               // { anio, mes } del mes mostrado en el calendario
+  cal: {},              // { anio, mes } del mes mostrado en el calendario
+  hallazgosTab: 'tabla', // pestaña activa en Hallazgos: 'tabla' | 'seguimiento' | 'kanban'
+  rastro: []            // breadcrumbs: [{tipo:'inspeccion'|'hallazgo', id, label}]
 };
+
+/* ============================================================
+   Breadcrumbs (migas de pan) para los modales de detalle.
+   App.rastro guarda el camino recorrido; cada paso es clicable.
+   ============================================================ */
+
+/* Devuelve el HTML de la barra de breadcrumbs para el rastro actual.
+   `seccionBase` es el origen (p.ej. 'Inspecciones' o 'Hallazgos'). */
+function breadcrumbsHTML(seccionBase) {
+  const pasos = App.rastro || [];
+  let html = `<div class="bc">`;
+  if (seccionBase) {
+    html += `<a href="javascript:void(0)" class="bc-item" data-bc="seccion">${seccionBase.label}</a>`;
+  }
+  pasos.forEach((p, i) => {
+    const esUltimo = i === pasos.length - 1;
+    html += `<span class="bc-sep">›</span>`;
+    if (esUltimo) {
+      html += `<span class="bc-actual">${p.label}</span>`;
+    } else {
+      html += `<a href="javascript:void(0)" class="bc-item" data-bc="${i}">${p.label}</a>`;
+    }
+  });
+  html += `</div>`;
+  return html;
+}
+
+/* Engancha los clics de los breadcrumbs dentro del modal.
+   seccionBase: { vista } para volver a la sección (cierra modal y navega). */
+function bindBreadcrumbs(seccionBase) {
+  $$('#modal-content .bc-item').forEach(a => {
+    a.addEventListener('click', () => {
+      const key = a.dataset.bc;
+      if (key === 'seccion') {
+        $('#modal').classList.add('hidden');
+        App.rastro = [];
+        if (seccionBase && seccionBase.vista) navegar(seccionBase.vista);
+        return;
+      }
+      // Clic en un paso intermedio: recortamos el rastro hasta ahí y reabrimos.
+      const idx = Number(key);
+      const paso = App.rastro[idx];
+      App.rastro = App.rastro.slice(0, idx); // el abrir volverá a apilar
+      if (paso.tipo === 'inspeccion') abrirDetalleInspeccion(paso.id);
+      else if (paso.tipo === 'hallazgo') abrirDetalleHallazgo(paso.id);
+    });
+  });
+}
 
 /* ---------- Utilidades frontend ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -22,12 +72,47 @@ const pct = (v) => (v === null || v === undefined) ? '—' : Number(v).toFixed(1
 /* Formatea una fecha ISO 'yyyy-MM-dd' a 'dd/MM/yyyy' (formato sencillo).
    Si recibe 'yyyy-MM-dd HH:mm', conserva la hora al final. */
 function fFecha(s) {
-  if (!s) return '—';
+  if (s === null || s === undefined || s === '') return '—';
   const txt = String(s).trim();
-  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
-  if (!m) return txt;
-  const dmy = `${m[3]}/${m[2]}/${m[1]}`;
-  return m[4] ? `${dmy} ${m[4]}` : dmy;
+
+  // Caso 1: ISO 'yyyy-MM-dd' (opcionalmente con hora 'HH:mm').
+  let m = txt.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (m) {
+    const dmy = `${m[3]}/${m[2]}/${m[1]}`;
+    return m[4] ? `${dmy} ${m[4]}` : dmy;
+  }
+
+  // Caso 2: la celda llegó como objeto Date serializado por Apps Script,
+  // p.ej. "Thu Oct 01 2026 00:00:00 GMT-0500 (...)". Lo parseamos con Date.
+  const d = new Date(txt);
+  if (!isNaN(d.getTime())) {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = d.getHours(), mi = d.getMinutes();
+    const base = `${dd}/${mm}/${yyyy}`;
+    // Añade la hora solo si no es medianoche (fecha pura).
+    return (hh || mi) ? `${base} ${String(hh).padStart(2, '0')}:${String(mi).padStart(2, '0')}` : base;
+  }
+
+  // Caso 3: no reconocible -> se muestra tal cual.
+  return txt;
+}
+
+/* Formatea una HORA a 'HH:mm'. Tolera:
+   - texto 'HH:mm'
+   - Date serializado (incl. el valor de solo-hora anclado a 1899:
+     'Sat Dec 30 1899 12:50:00 GMT-...') -> extrae solo la hora. */
+function fHora(s) {
+  if (s === null || s === undefined || s === '') return '—';
+  const txt = String(s).trim();
+  const m = txt.match(/\b(\d{1,2}):(\d{2})\b/);   // encuentra HH:mm en el texto
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  const d = new Date(txt);
+  if (!isNaN(d.getTime())) {
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  return txt;
 }
 
 function destruirCharts() {
@@ -42,19 +127,31 @@ function empty(msg) { return `<div class="empty">${msg || 'Datos insuficientes'}
    Acepta uno o varios argumentos: api('fn', a, b, ...). */
 function api(fn, ...args) {
   return new Promise((resolve, reject) => {
-    google.script.run
-      .withSuccessHandler(resolve)
-      .withFailureHandler(reject)
-      [fn](...args);
+    let resuelto = false;
+    // Timeout de seguridad: si el backend no responde (p. ej. falta autorizar
+    // un permiso, o la función no existe), no dejamos la promesa colgada.
+    const t = setTimeout(() => {
+      if (!resuelto) { resuelto = true; reject(new Error('El servidor no respondió (posible permiso pendiente de autorizar o función no desplegada).')); }
+    }, 25000);
+    try {
+      google.script.run
+        .withSuccessHandler((r) => { if (!resuelto) { resuelto = true; clearTimeout(t); resolve(r); } })
+        .withFailureHandler((e) => { if (!resuelto) { resuelto = true; clearTimeout(t); reject(e); } })
+        [fn](...args);
+    } catch (e) {
+      if (!resuelto) { resuelto = true; clearTimeout(t); reject(e); }
+    }
   });
 }
 
 /* ---------- Inicialización ---------- */
-window.addEventListener('DOMContentLoaded', async () => {
+window.addEventListener('DOMContentLoaded', () => {
   bindUI();
-  await cargarOpcionesFiltros();
-  routear();
   window.addEventListener('hashchange', routear);
+  // Pinta el dashboard INMEDIATAMENTE (no espera al backend) para que nunca
+  // quede un spinner infinito. Los filtros se cargan en segundo plano.
+  routear();
+  cargarOpcionesFiltros().catch(e => console.warn('Filtros no cargados:', e));
 });
 
 function bindUI() {
@@ -64,10 +161,10 @@ function bindUI() {
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('#modal').classList.add('hidden'); });
 
   // Navegación del sidebar.
-  // En una Web App de Apps Script el contenido vive dentro de un <iframe>
-  // sandbox; un <a href="#..."> con base target="_top" intentaría navegar la
-  // ventana completa (y "sale" del iframe). Interceptamos el clic y cambiamos
-  // la vista por JS, igual que hacen las tarjetas KPI (que sí funcionan).
+  // En una Web App de Apps Script el contenido vive dentro de un iframe
+  // sandbox; un enlace con href de ancla y base target _top intentaría navegar
+  // la ventana completa (y "sale" del iframe). Interceptamos el clic y
+  // cambiamos la vista por JS, igual que hacen las tarjetas KPI.
   $$('.nav-item').forEach(a => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
@@ -95,7 +192,12 @@ async function cargarOpcionesFiltros() {
     llenarSelect('#f-estado', o.estados);
     const sr = $('#f-ruta');
     o.rutas.forEach(r => sr.appendChild(new Option(r.codigo + ' · ' + r.nombre, r.codigo)));
-  } catch (e) { console.warn('No se pudieron cargar filtros', e); }
+  } catch (e) {
+    console.warn('No se pudieron cargar filtros', e);
+    // Aviso visible (no bloqueante) en la barra de filtros.
+    const barra = $('#filtros-activos');
+    if (barra) barra.innerHTML = `<span class="chip" style="background:#c62828">⚠️ ${(e && e.message) || 'No se pudieron cargar los filtros'}</span>`;
+  }
 }
 
 function llenarSelect(sel, items) {
@@ -140,7 +242,9 @@ function routear() {
   const destino = App.ruta || (location.hash ? location.hash.slice(1) : '') || 'dashboard';
   const [vista, param] = destino.split('/');
   App.vistaActual = vista;
-  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === vista));
+  // 'seguimiento' es un alias que vive dentro de Hallazgos: resalta Hallazgos.
+  const vistaMenu = (vista === 'seguimiento') ? 'hallazgos' : vista;
+  $$('.nav-item').forEach(a => a.classList.toggle('active', a.dataset.view === vistaMenu));
   destruirCharts();
   setLoader();
 
@@ -154,12 +258,23 @@ function routear() {
     cumplimiento: renderCumplimiento,
     criterios: renderCriterios,
     hallazgos: renderHallazgos,
-    seguimiento: renderSeguimiento,
+    // 'seguimiento' se fusionó en Hallazgos (pestaña interna). Redirección
+    // suave por compatibilidad con enlaces/hábitos previos.
+    seguimiento: function () { App.hallazgosTab = 'seguimiento'; renderHallazgos(); },
     estandarizacion: renderEstandarizacion,
     mapa: renderMapa,
     tendencias: renderTendencias
   };
-  (rutas[vista] || renderDashboard)(param);
+  // Protección global: si la vista lanza (síncrono o promesa rechazada), se
+  // muestra el error en pantalla en vez de dejar el spinner 'Cargando…'.
+  try {
+    const resultado = (rutas[vista] || renderDashboard)(param);
+    if (resultado && typeof resultado.catch === 'function') {
+      resultado.catch(e => mostrarError(e));
+    }
+  } catch (e) {
+    mostrarError(e);
+  }
 }
 
 /* ============================================================
@@ -369,11 +484,13 @@ async function renderCriterios() {
 async function renderHallazgos() {
   let d; try { d = await api('obtenerHallazgos', App.filtros); } catch (e) { return mostrarError(e); }
   const k = d.kpis;
-  const filtroInsp = App.filtros.idInspeccion
-    ? `<span class="chip">Inspección: ${App.filtros.idInspeccion} <a href="javascript:void(0)" id="h-limpiar-insp" style="color:#fff">✕</a></span>` : '';
+  if (!App.hallazgosTab) App.hallazgosTab = 'tabla';
+  const tab = App.hallazgosTab;
 
+  // Encabezado + KPIs + pestañas (comunes a las 3 vistas).
   $('#view').innerHTML = `
-    <div><div class="view-title">Gestión de Hallazgos</div></div>
+    <div><div class="view-title">Gestión de Hallazgos</div>
+      <div class="view-sub">Registro, seguimiento y flujo de los hallazgos 5S</div></div>
     <div class="kpi-grid">
       ${miniKpi('Total', k.total)}${miniKpi('Abiertos', k.abiertosEstado ?? k.abiertos, 'rojo')}
       ${miniKpi('En proceso', k.enProceso ?? k.enSeguimiento, 'azul')}
@@ -384,6 +501,31 @@ async function renderHallazgos() {
       ${miniKpi('T. prom. cierre', k.tiempoPromedioCierre != null ? k.tiempoPromedioCierre + ' d' : '—')}
       ${miniKpi('Corrección inmediata', pct(k.correccionInmediataPct))}
     </div>
+    <div class="ficha-tabs" id="h-tabs">
+      <button class="ftab ${tab === 'tabla' ? 'active' : ''}" data-htab="tabla">📋 Registro</button>
+      <button class="ftab ${tab === 'seguimiento' ? 'active' : ''}" data-htab="seguimiento">⏰ Seguimiento</button>
+      <button class="ftab ${tab === 'kanban' ? 'active' : ''}" data-htab="kanban">▦ Kanban</button>
+    </div>
+    <div id="h-panel"></div>`;
+
+  // Cambio de pestaña.
+  $$('#h-tabs .ftab').forEach(btn => btn.addEventListener('click', () => {
+    App.hallazgosTab = btn.dataset.htab;
+    renderHallazgos();
+  }));
+
+  // Cuerpo según pestaña.
+  if (tab === 'tabla') pintarHallazgosTabla(d);
+  else if (tab === 'seguimiento') pintarHallazgosSeguimiento();
+  else if (tab === 'kanban') pintarHallazgosKanban();
+}
+
+/* --- Pestaña REGISTRO: gráficos + tabla + exportar (lo que antes era Hallazgos) --- */
+function pintarHallazgosTabla(d) {
+  const filtroInsp = App.filtros.idInspeccion
+    ? `<span class="chip">Inspección: ${App.filtros.idInspeccion} <a href="javascript:void(0)" id="h-limpiar-insp" style="color:#fff">✕</a></span>` : '';
+
+  $('#h-panel').innerHTML = `
     <div class="grid-3">
       <div class="card"><h3>Por módulo</h3><div class="chart-wrap"><canvas id="h-mod"></canvas></div></div>
       <div class="card"><h3>Por tipo</h3><div class="chart-wrap"><canvas id="h-tipo"></canvas></div></div>
@@ -395,6 +537,7 @@ async function renderHallazgos() {
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <input class="search-box" id="h-insp" placeholder="Filtrar por ID inspección…" style="width:200px" value="${App.filtros.idInspeccion || ''}">
           <input class="search-box" id="h-buscar" placeholder="Buscar…" style="width:180px">
+          <button class="btn" id="h-export">⬇ Exportar CSV</button>
         </div>
       </div>
       <div class="table-wrap"><table id="h-tabla"><thead><tr>
@@ -407,13 +550,13 @@ async function renderHallazgos() {
   doughnutChart('h-tipo', d.porTipo.map(x => x.etiqueta), d.porTipo.map(x => x.valor));
   doughnutChart('h-5s', d.por5S.map(x => x.etiqueta), d.por5S.map(x => x.valor));
 
-  renderTablaHallazgos(d.tabla);
+  let visiblesHall = d.tabla.slice();
+  renderTablaHallazgos(visiblesHall);
   $('#h-buscar').addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase();
-    renderTablaHallazgos(d.tabla.filter(h =>
-      JSON.stringify(h).toLowerCase().includes(q)));
+    visiblesHall = d.tabla.filter(h => JSON.stringify(h).toLowerCase().includes(q));
+    renderTablaHallazgos(visiblesHall);
   });
-  // Filtro por ID de inspección (recarga desde servidor para traer todos).
   $('#h-insp').addEventListener('change', (e) => {
     App.filtros.idInspeccion = e.target.value.trim();
     renderHallazgos();
@@ -422,6 +565,105 @@ async function renderHallazgos() {
   if (limpiarInsp) limpiarInsp.addEventListener('click', () => {
     delete App.filtros.idInspeccion; renderHallazgos();
   });
+  $('#h-export').addEventListener('click', () => {
+    exportarCSV('hallazgos_5S', [
+      { clave: 'idHallazgo', titulo: 'ID Hallazgo' },
+      { clave: 'fecha', titulo: 'Fecha', fmt: fFecha },
+      { clave: 'area', titulo: 'Área' },
+      { clave: 'modulo', titulo: 'Módulo' },
+      { clave: 'ruta', titulo: 'ID Inspección' },
+      { clave: 'tipo', titulo: 'Tipo' },
+      { clave: 'descripcion', titulo: 'Descripción' },
+      { clave: 'cincoS', titulo: '5S relacionada' },
+      { clave: 'responsable', titulo: 'Responsable' },
+      { clave: 'fechaLimite', titulo: 'Fecha límite', fmt: fFecha },
+      { clave: 'estado', titulo: 'Estado' },
+      { clave: 'vencido', titulo: 'Vencido', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'diasAbiertos', titulo: 'Días abiertos' },
+      { clave: 'correccionInmediata', titulo: 'Corrección inmediata', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'accion', titulo: 'Acción' }
+    ], visiblesHall);
+  });
+}
+
+/* --- Pestaña SEGUIMIENTO: bandeja de acción (solo lo accionable) --- */
+async function pintarHallazgosSeguimiento() {
+  const panel = $('#h-panel');
+  panel.innerHTML = '<div class="loader">Cargando…</div>';
+  let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { panel.innerHTML = empty('Error al cargar.'); return; }
+  const r = d.resumen;
+
+  // Solo lo ACCIONABLE: ocultamos lo cerrado/verde (eso ya está en Registro).
+  const accion = (d.acciones || []).filter(a => a.semaforo !== 'verde');
+  accion.sort((a, b) => orden(b.semaforo) - orden(a.semaforo));
+
+  panel.innerHTML = `
+    <div class="kpi-grid">
+      ${miniKpi('Vencidas', r.vencidas, 'rojo')}
+      ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}
+      ${miniKpi('Pendientes', r.pendientes)}
+    </div>
+    <div class="card"><h3>Acciones que requieren atención</h3>
+      <div class="table-wrap"><table id="s-tabla"><thead><tr>
+        <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
+        <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
+      </tr></thead><tbody></tbody></table></div></div>`;
+
+  const tb = $('#s-tabla tbody');
+  if (!accion.length) { tb.innerHTML = `<tr><td colspan="9">${empty('Nada pendiente de atención. ¡Todo al día!')}</td></tr>`; return; }
+  accion.forEach(a => {
+    const tr = el('tr', 'row-click');
+    tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
+      <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
+      <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
+      <td>${fFecha(a.fechaLimite)}</td><td><span class="badge ${(a.estado || '').split(' ')[0]}">${a.estado}</span></td>
+      <td>${a.diasAbiertos ?? '—'}</td>`;
+    tr.addEventListener('click', () => abrirDetalleHallazgo(a.idHallazgo));
+    tb.appendChild(tr);
+  });
+  habilitarOrden('s-tabla');
+}
+
+/* --- Pestaña KANBAN: tablero por estado --- */
+async function pintarHallazgosKanban() {
+  const panel = $('#h-panel');
+  panel.innerHTML = '<div class="loader">Cargando…</div>';
+  let d; try { d = await api('obtenerKanbanHallazgos', App.filtros); } catch (e) { panel.innerHTML = empty('Error al cargar.'); return; }
+
+  const colorEstado = {
+    'Abierto': 'rojo', 'En proceso': 'azul', 'Corregido': 'verde',
+    'Cerrado': 'verde', 'No aplica': 'gris', 'Reabierto': 'morado'
+  };
+  const columnasHtml = d.estados.map(est => {
+    const items = d.columnas[est] || [];
+    return `<div class="kb-col" data-estado="${est}">
+      <div class="kb-col-head ${colorEstado[est] || 'gris'}">
+        <span>${est}</span><span class="kb-count">${items.length}</span>
+      </div>
+      <div class="kb-col-body" data-estado="${est}">
+        ${items.map(h => tarjetaKanban(h, est, d.estados)).join('') || '<div class="kb-vacio">—</div>'}
+      </div></div>`;
+  }).join('');
+
+  panel.innerHTML = `<div class="view-sub" style="margin-bottom:8px">${d.total} hallazgo(s) · mueve con ‹ › o arrastrando</div>
+    <div class="kb-board">${columnasHtml}</div>`;
+
+  $$('#h-panel .kb-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.kb-mover')) return;
+      abrirDetalleHallazgo(card.dataset.id);
+    });
+  });
+  $$('#h-panel .kb-mover').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: btn.dataset.id, nuevoEstado: btn.dataset.destino, comentario: 'Movido desde Kanban' });
+      if (!r.ok) { alert(r.error || 'No se pudo mover.'); btn.disabled = false; return; }
+      pintarHallazgosKanban();
+    });
+  });
+  habilitarDragKanbanEn('#h-panel', pintarHallazgosKanban);
 }
 
 function renderTablaHallazgos(filas) {
@@ -458,39 +700,60 @@ function badgeEstadoHallazgo(estado, vencido) {
 }
 
 /* ============================================================
-   VISTA: SEGUIMIENTO
+   SEGUIMIENTO: fusionado en Hallazgos (pestañas internas).
+   Se conserva 'orden' (usado por la pestaña Seguimiento) y las piezas
+   del Kanban (tarjetaKanban, drag) reutilizadas por las pestañas.
    ============================================================ */
 async function renderSeguimiento() {
-  let d; try { d = await api('obtenerAccionesPendientes', App.filtros); } catch (e) { return mostrarError(e); }
-  const r = d.resumen;
-  $('#view').innerHTML = `
-    <div><div class="view-title">Seguimiento de Acciones</div></div>
-    <div class="kpi-grid">
-      ${miniKpi('Pendientes', r.pendientes)}${miniKpi('Vencidas', r.vencidas, 'rojo')}
-      ${miniKpi('Próximas a vencer', r.proximasVencer, 'amarillo')}${miniKpi('Cerradas', r.cerradas, 'verde')}
-    </div>
-    <div class="card"><h3>Acciones</h3>
-      <div class="table-wrap"><table id="s-tabla"><thead><tr>
-        <th></th><th>ID</th><th>Descripción</th><th>Módulo</th><th>Responsable</th>
-        <th>Área resp.</th><th>F. límite</th><th>Estado</th><th>Días</th>
-      </tr></thead><tbody></tbody></table></div></div>`;
-
-  const tb = $('#s-tabla tbody');
-  if (!d.acciones.length) { tb.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
-  d.acciones.sort((a, b) => orden(b.semaforo) - orden(a.semaforo));
-  d.acciones.forEach(a => {
-    const tr = el('tr');
-    const est = (a.estado || '').split(' ')[0];
-    tr.innerHTML = `<td><span class="dot ${a.semaforo}"></span></td><td>${a.idHallazgo}</td>
-      <td title="${a.descripcion}">${recortar(a.descripcion, 45)}</td><td>${a.modulo || '—'}</td>
-      <td>${a.responsableAccion || '—'}</td><td>${a.areaResponsable || '—'}</td>
-      <td>${a.fechaLimite || '—'}</td><td><span class="badge ${est}">${a.estado}</span></td>
-      <td>${a.diasAbiertos ?? '—'}</td>`;
-    tb.appendChild(tr);
-  });
-  habilitarOrden('s-tabla');
+  // Compatibilidad: antes era una vista; ahora es la pestaña de Hallazgos.
+  App.hallazgosTab = 'seguimiento';
+  return renderHallazgos();
 }
 function orden(s){return {rojo:3,amarillo:2,gris:1,verde:0}[s]||0;}
+
+/* ============================================================
+   VISTA: KANBAN de seguimiento (tablero por estado)
+   ============================================================ */
+function tarjetaKanban(h, estadoActual, estados) {
+  const idx = estados.indexOf(estadoActual);
+  const prev = idx > 0 ? estados[idx - 1] : '';
+  const next = idx >= 0 && idx < estados.length - 1 ? estados[idx + 1] : '';
+  const venc = h.vencido ? '<span class="badge rojo" style="font-size:9px">Vencido</span>' : '';
+  return `<div class="kb-card" draggable="true" data-id="${h.idHallazgo}">
+    <div class="kb-card-top"><strong>${h.idHallazgo}</strong>${venc}</div>
+    <div class="kb-card-desc" title="${h.descripcion || ''}">${recortar(h.descripcion, 60)}</div>
+    <div class="kb-card-meta">${h.modulo || '—'} · ${h.responsable || 'sin resp.'}</div>
+    ${h.fechaLimite ? `<div class="kb-card-meta">Límite: ${fFecha(h.fechaLimite)}</div>` : ''}
+    <div class="kb-card-acts">
+      ${prev ? `<button class="kb-mover" data-id="${h.idHallazgo}" data-destino="${prev}" title="Mover a ${prev}">‹</button>` : '<span></span>'}
+      ${next ? `<button class="kb-mover" data-id="${h.idHallazgo}" data-destino="${next}" title="Mover a ${next}">›</button>` : '<span></span>'}
+    </div>
+  </div>`;
+}
+
+/* Drag & drop entre columnas dentro de `contenedorSel`. Al soltar, cambia el
+   estado del hallazgo al de la columna destino y ejecuta `onCambio` (repintar).
+   El botón ‹ › sigue siendo el método fiable; esto es el respaldo visual. */
+function habilitarDragKanbanEn(contenedorSel, onCambio) {
+  let arrastrando = null;
+  $$(contenedorSel + ' .kb-card').forEach(card => {
+    card.addEventListener('dragstart', () => { arrastrando = card; card.classList.add('kb-drag'); });
+    card.addEventListener('dragend', () => { card.classList.remove('kb-drag'); arrastrando = null; });
+  });
+  $$(contenedorSel + ' .kb-col-body').forEach(body => {
+    body.addEventListener('dragover', (e) => { e.preventDefault(); body.classList.add('kb-over'); });
+    body.addEventListener('dragleave', () => body.classList.remove('kb-over'));
+    body.addEventListener('drop', async (e) => {
+      e.preventDefault(); body.classList.remove('kb-over');
+      if (!arrastrando) return;
+      const id = arrastrando.dataset.id;
+      const destino = body.dataset.estado;
+      const r = await api('apiCambiarEstadoHallazgo', { idHallazgo: id, nuevoEstado: destino, comentario: 'Movido desde Kanban (drag)' });
+      if (!r.ok) { alert(r.error || 'No se pudo mover.'); return; }
+      if (onCambio) onCambio();
+    });
+  });
+}
 
 /* ============================================================
    VISTA: ESTANDARIZACIÓN
@@ -509,20 +772,62 @@ async function renderEstandarizacion() {
       <div class="card"><h3>Por tipo de intervención</h3><div class="chart-wrap"><canvas id="e-interv"></canvas></div></div>
       <div class="card"><h3>Tiempo promedio por tipo (min)</h3><div class="chart-wrap"><canvas id="e-tiempo"></canvas></div></div>
     </div>
-    <div class="card"><h3>Top problemas recurrentes</h3>
-      <div class="table-wrap"><table><thead><tr>
-        <th>Ocurrencias</th><th>Tipo</th><th>5S</th><th>Módulo</th><th>Ejemplo</th>
-      </tr></thead><tbody id="e-rec"></tbody></table></div></div>`;
+
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between;flex-wrap:wrap">
+        <div><h3 style="margin:0">Problemas recurrentes — candidatos a estandarizar</h3>
+          <span class="muted" style="font-size:12px" id="rec-resumen"></span></div>
+        <label class="muted" style="font-size:12px">Mín. repeticiones:
+          <select id="rec-min" class="search-box" style="width:auto">
+            <option value="2">2+</option><option value="3" selected>3+</option><option value="4">4+</option>
+          </select>
+        </label>
+      </div>
+      <div class="rec-leyenda">
+        <span><i class="leg-dot" style="background:#c62828"></i>Crónico (≈ semanal)</span>
+        <span><i class="leg-dot" style="background:#f9a825"></i>Frecuente (3+)</span>
+        <span><i class="leg-dot" style="background:#546e7a"></i>Repetido (2)</span>
+      </div>
+      <div id="rec-lista"></div>
+    </div>`;
 
   doughnutChart('e-interv', d.porTipoIntervencion.map(x => x.etiqueta), d.porTipoIntervencion.map(x => x.valor));
   barChart('e-tiempo', d.tiempoPorTipo.map(x => x.tipo), d.tiempoPorTipo.map(x => x.promedioMin), 'min');
-  const tb = $('#e-rec');
-  if (!d.topRecurrentes.length) { tb.innerHTML = `<tr><td colspan="5">${empty('Sin recurrencias detectadas')}</td></tr>`; }
-  d.topRecurrentes.forEach(r => {
-    tb.insertAdjacentHTML('beforeend',
-      `<tr><td><strong>${r.ocurrencias}</strong></td><td>${r.tipo || '—'}</td><td>${recortar(r.cincoS, 16)}</td>
-       <td>${r.modulo || '—'}</td><td title="${r.ejemplo}">${recortar(r.ejemplo, 50)}</td></tr>`);
-  });
+
+  const rec = d.recurrencia || { grupos: [], totalGrupos: 0, cronicos: 0, frecuentes: 0 };
+  $('#rec-resumen').textContent =
+    `${rec.totalGrupos} grupo(s) recurrente(s) · ${rec.cronicos} crónico(s) · ${rec.frecuentes} frecuente(s)`;
+
+  const pintarRec = () => {
+    const min = Number($('#rec-min').value);
+    const grupos = rec.grupos.filter(g => g.ocurrencias >= min);
+    const cont = $('#rec-lista');
+    if (!grupos.length) { cont.innerHTML = empty('No se detectaron problemas recurrentes con este umbral.'); return; }
+    cont.innerHTML = grupos.map(g => {
+      const col = { cronico: 'rojo', frecuente: 'amarillo', repetido: 'gris', aislado: 'gris' }[g.severidad] || 'gris';
+      const etiqueta = { cronico: 'Crónico', frecuente: 'Frecuente', repetido: 'Repetido', aislado: 'Aislado' }[g.severidad];
+      return `<div class="rec-item">
+        <div class="rec-item-head">
+          <span class="rec-oc">${g.ocurrencias}×</span>
+          <span class="badge ${col}">${etiqueta}</span>
+          <span class="rec-desc" title="${g.descripcion}">${recortar(g.descripcion, 70)}</span>
+        </div>
+        <div class="rec-item-meta">
+          ${g.cincoS ? '5S: ' + g.cincoS + ' · ' : ''}Módulos: ${g.modulos.join(', ') || '—'}
+          · ${fFecha(g.primeraFecha)} → ${fFecha(g.ultimaFecha)}
+          ${g.frecuenciaSemanal ? ' · ~' + g.frecuenciaSemanal + '/semana' : ''}
+          · Abiertos: ${g.abiertos}/${g.ocurrencias}
+        </div>
+        <div class="rec-reco">💡 ${g.recomendacion}</div>
+        <div class="rec-ids">${g.ids.map(id => `<a href="javascript:void(0)" class="rec-id" data-id="${id}">${id}</a>`).join(' ')}</div>
+      </div>`;
+    }).join('');
+    // Clic en un ID -> abre la ficha de ese hallazgo.
+    cont.querySelectorAll('.rec-id').forEach(a =>
+      a.addEventListener('click', () => abrirDetalleHallazgo(a.dataset.id)));
+  };
+  $('#rec-min').addEventListener('change', pintarRec);
+  pintarRec();
 }
 
 /* ============================================================
@@ -807,6 +1112,7 @@ async function renderInspecciones() {
           <input id="i-cmin" class="search-box" style="width:110px" type="number" placeholder="Cumpl. mín %">
           <input id="i-cmax" class="search-box" style="width:110px" type="number" placeholder="Cumpl. máx %">
           <input class="search-box" id="i-buscar" placeholder="Buscar…" style="width:180px">
+          <button class="btn" id="i-export">⬇ Exportar CSV</button>
         </div>
       </div>
       <div class="table-wrap"><table id="i-tabla"><thead><tr>
@@ -819,7 +1125,7 @@ async function renderInspecciones() {
   const filaInsp = (i) => {
     const sem = i.cumplimiento == null ? 'gris' : (i.cumplimiento >= 85 ? 'verde' : i.cumplimiento >= 70 ? 'amarillo' : 'rojo');
     return `<tr class="row-click" data-id="${i.id}">
-      <td>${i.id}</td><td>${fFecha(i.fecha)}</td><td>${i.horaInicio || '—'}</td><td>${i.horaFinal || '—'}</td>
+      <td>${i.id}</td><td>${fFecha(i.fecha)}</td><td>${fHora(i.horaInicio)}</td><td>${fHora(i.horaFinal)}</td>
       <td>${i.duracionMin != null ? i.duracionMin + ' min' : '—'}</td><td>${i.responsable || '—'}</td>
       <td>${i.area || '—'}</td><td>${i.modulo || '—'}</td><td>${i.rutas || '—'}</td>
       <td><span class="badge ${sem}">${i.cumplimiento != null ? i.cumplimiento + '%' : '—'}</span></td>
@@ -838,20 +1144,40 @@ async function renderInspecciones() {
     const tr = e.target.closest('tr[data-id]'); if (tr) abrirDetalleInspeccion(tr.dataset.id);
   });
 
+  let visiblesInsp = d.tabla.slice(); // dataset visible para exportar
   const refiltrar = () => {
     const q = ($('#i-buscar').value || '').toLowerCase();
     const conh = $('#i-conhall').value;
     const cmin = $('#i-cmin').value, cmax = $('#i-cmax').value;
-    pager.setDatos(d.tabla.filter(i => {
+    visiblesInsp = d.tabla.filter(i => {
       if (conh === 'si' && !i.numHallazgos) return false;
       if (conh === 'no' && i.numHallazgos) return false;
       if (cmin !== '' && !(i.cumplimiento != null && i.cumplimiento >= Number(cmin))) return false;
       if (cmax !== '' && !(i.cumplimiento != null && i.cumplimiento <= Number(cmax))) return false;
       return !q || JSON.stringify(i).toLowerCase().includes(q);
-    }));
+    });
+    pager.setDatos(visiblesInsp);
   };
   ['i-buscar', 'i-conhall', 'i-cmin', 'i-cmax'].forEach(id => {
     const elt = $('#' + id); if (elt) elt.addEventListener('input', refiltrar);
+  });
+  // Exportar CSV de lo visible.
+  $('#i-export').addEventListener('click', () => {
+    exportarCSV('inspecciones_5S', [
+      { clave: 'id', titulo: 'ID Inspección' },
+      { clave: 'fecha', titulo: 'Fecha', fmt: fFecha },
+      { clave: 'horaInicio', titulo: 'Hora inicio', fmt: fHora },
+      { clave: 'horaFinal', titulo: 'Hora final', fmt: fHora },
+      { clave: 'duracionMin', titulo: 'Duración (min)' },
+      { clave: 'responsable', titulo: 'Responsable' },
+      { clave: 'area', titulo: 'Área' },
+      { clave: 'modulo', titulo: 'Módulo' },
+      { clave: 'rutas', titulo: 'Ruta(s)' },
+      { clave: 'cumplimiento', titulo: '% Cumplimiento' },
+      { clave: 'numHallazgos', titulo: 'N° Hallazgos' },
+      { clave: 'requiereSeguimiento', titulo: 'Requiere seguimiento', fmt: (v) => v ? 'Sí' : 'No' },
+      { clave: 'completada', titulo: 'Estado', fmt: (v) => v ? 'Completada' : 'Abierta' }
+    ], visiblesInsp);
   });
 }
 
@@ -1177,6 +1503,10 @@ function abrirFormCatalogo(item) {
 async function abrirDetalleInspeccion(id) {
   let d; try { d = await api('obtenerDetalleInspeccion', id); } catch (e) { return mostrarError(e); }
   const i = d.inspeccion || {};
+
+  // Breadcrumbs: apila este paso si no es el último del rastro.
+  apilarRastro({ tipo: 'inspeccion', id: id, label: id });
+
   const filas = (d.criterios || []).map(c =>
     `<tr><td>${c.codigoRuta}</td><td>${c.nombreCriterio}</td>
      <td><span class="badge ${badgeResultado(c.resultado)}">${c.resultado}</span></td></tr>`).join('');
@@ -1189,13 +1519,14 @@ async function abrirDetalleInspeccion(id) {
      </div>`).join('') : '<p class="muted">Sin hallazgos generados en esta inspección.</p>';
 
   $('#modal-content').innerHTML = `
+    ${breadcrumbsHTML({ label: 'Inspecciones', vista: 'inspecciones' })}
     <h2 style="margin-bottom:4px">Inspección ${id}</h2>
     <p><span class="badge ${i.completada ? 'verde' : 'amarillo'}">${i.completada ? 'Completada' : 'Abierta'}</span>
        · Cumplimiento: <strong>${pct(d.cumplimiento)}</strong></p>
     <div class="grid-2" style="margin:14px 0">
       <div>${campo('Fecha', fFecha(i.fecha))}${campo('Responsable', i.responsable)}${campo('Área', i.area)}
         ${campo('Módulo', i.modulo)}${campo('¿Requiere seguimiento?', i.requiereSeguimiento ? 'Sí' : 'No')}</div>
-      <div>${campo('Rutas', i.rutas)}${campo('Inicio', i.horaInicio)}${campo('Fin', i.horaFinal)}
+      <div>${campo('Rutas', i.rutas)}${campo('Inicio', fHora(i.horaInicio))}${campo('Fin', fHora(i.horaFinal))}
         ${campo('Duración (min)', i.duracionMin)}</div>
     </div>
     <h3>Criterios evaluados</h3>
@@ -1205,10 +1536,28 @@ async function abrirDetalleInspeccion(id) {
     <div class="hall-list">${hallHtml}</div>
     ${i.observaciones ? '<h3 style="margin-top:16px">Observaciones</h3><p class="muted">' + i.observaciones + '</p>' : ''}`;
   $('#modal').classList.remove('hidden');
+  bindBreadcrumbs({ label: 'Inspecciones', vista: 'inspecciones' });
 
   // Navegación bidireccional: clic en un hallazgo abre su ficha.
   $$('#modal-content .hall-chip').forEach(ch =>
     ch.addEventListener('click', () => abrirDetalleHallazgo(ch.dataset.hall)));
+}
+
+/* Apila un paso en el rastro de breadcrumbs. Si el paso ya es el último
+   (mismo tipo+id), no duplica. Si se "retrocede" a un paso que ya existe,
+   el rastro ya fue recortado por bindBreadcrumbs antes de reabrir. */
+function apilarRastro(paso) {
+  // Si el modal está cerrado, es una apertura "desde cero" (clic en una tabla):
+  // reiniciamos el rastro. Si está abierto, venimos navegando dentro de un
+  // modal (p.ej. inspección -> hallazgo) y acumulamos.
+  var modalCerrado = $('#modal').classList.contains('hidden');
+  if (modalCerrado) App.rastro = [];
+
+  var r = App.rastro || [];
+  var ultimo = r[r.length - 1];
+  if (ultimo && ultimo.tipo === paso.tipo && ultimo.id === paso.id) return;
+  r.push(paso);
+  App.rastro = r;
 }
 
 /* ============================================================
@@ -1220,8 +1569,10 @@ async function abrirDetalleHallazgo(idHallazgo) {
   if (idHallazgo && typeof idHallazgo === 'object') idHallazgo = idHallazgo.idHallazgo;
   let d; try { d = await api('apiDetalleHallazgo', idHallazgo); } catch (e) { return mostrarError(e); }
   if (!d.ok) { alert(d.error || 'No se encontró el hallazgo.'); return; }
+  apilarRastro({ tipo: 'hallazgo', id: idHallazgo, label: idHallazgo });
   pintarFichaHallazgo(d);
   $('#modal').classList.remove('hidden');
+  bindBreadcrumbs({ label: 'Hallazgos', vista: 'hallazgos' });
 }
 
 function pintarFichaHallazgo(d) {
@@ -1258,7 +1609,7 @@ function pintarFichaHallazgo(d) {
   // Historial.
   let histHtml = (d.historial || []).map(ev => `
     <div class="tl-item"><div class="tl-dot"></div><div class="tl-body">
-      <div class="tl-fecha">${ev.fecha}</div>
+      <div class="tl-fecha">${fFecha(ev.fecha)}</div>
       <div><strong>${ev.evento}</strong>${ev.detalle ? ' — ' + ev.detalle : ''}</div>
       <div class="muted" style="font-size:11px">${ev.usuario || ''}</div></div></div>`).join('');
   if (!histHtml) histHtml = empty('Sin historial');
@@ -1266,6 +1617,7 @@ function pintarFichaHallazgo(d) {
   const dato = (v) => v || '<span class="muted">No disponible</span>';
 
   $('#modal-content').innerHTML = `
+    ${breadcrumbsHTML({ label: 'Hallazgos', vista: 'hallazgos' })}
     <div class="ficha-head">
       <div>
         <h2 style="margin-bottom:4px">${h.idHallazgo}</h2>
@@ -1310,7 +1662,12 @@ function pintarFichaHallazgo(d) {
 
     <div class="ftab-panel" data-panel="evid" hidden>
       <div class="toolbar"><h3 style="margin:0">Evidencias</h3>
-        <button class="btn" id="btn-add-evid">+ Agregar evidencia (URL)</button></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" id="btn-subir-evid">📎 Subir foto</button>
+          <button class="btn" id="btn-add-evid">🔗 Agregar por URL</button>
+        </div></div>
+      <input type="file" id="ev-file" accept="image/*" style="display:none">
+      <div id="ev-subida-msg" class="muted" style="font-size:12px;margin-bottom:8px"></div>
       ${galeria}
     </div>
 
@@ -1395,6 +1752,54 @@ function pintarFichaHallazgo(d) {
     const r = await api('apiAgregarEvidencia', { idHallazgo: h.idHallazgo, url, tipo, descripcion: desc });
     if (!r.ok) { alert(r.error); return; } recargar();
   });
+
+  // Subida directa de foto a Drive.
+  const btnSubir = $('#btn-subir-evid');
+  const inputFile = $('#ev-file');
+  if (btnSubir && inputFile) {
+    btnSubir.addEventListener('click', () => inputFile.click());
+    inputFile.addEventListener('change', () => subirFotoEvidencia(h.idHallazgo, inputFile, recargar));
+  }
+}
+
+/* Lee el archivo seleccionado, lo convierte a base64 y lo sube vía backend. */
+function subirFotoEvidencia(idHallazgo, inputFile, onOk) {
+  const file = inputFile.files && inputFile.files[0];
+  if (!file) return;
+  const msg = $('#ev-subida-msg');
+
+  // Validación de tamaño en cliente (coherente con el backend).
+  const maxMB = 15;
+  if (file.size > maxMB * 1024 * 1024) {
+    msg.innerHTML = `<span style="color:#ef9a9a">El archivo supera ${maxMB} MB.</span>`;
+    inputFile.value = ''; return;
+  }
+
+  const tipo = prompt('Tipo de evidencia (Inicial / Corrección / Verificación / Adicional):', 'Corrección') || 'Adicional';
+  msg.textContent = 'Subiendo foto…';
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    // reader.result tiene el formato data:MIME;base64,DATOS -> tomamos DATOS.
+    const base64 = String(reader.result).split(',')[1];
+    try {
+      const r = await api('apiSubirEvidencia', {
+        idHallazgo: idHallazgo,
+        tipo: tipo,
+        descripcion: file.name,
+        nombre: file.name,
+        mimeType: file.type || 'image/jpeg',
+        base64: base64
+      });
+      if (!r.ok) { msg.innerHTML = `<span style="color:#ef9a9a">${r.error}</span>`; return; }
+      msg.innerHTML = '✅ Foto subida.';
+      if (onOk) onOk();
+    } catch (e) {
+      msg.innerHTML = `<span style="color:#ef9a9a">${(e && e.message) || e}</span>`;
+    }
+  };
+  reader.onerror = () => { msg.innerHTML = '<span style="color:#ef9a9a">No se pudo leer el archivo.</span>'; };
+  reader.readAsDataURL(file);
 }
 
 /* Convierte una URL de Google Drive en URL de miniatura visualizable.
@@ -1539,6 +1944,52 @@ function miniKpi(l, v, border) {
   return `<div class="kpi ${border ? 'border-' + border : ''}"><div class="k-label">${l}</div><div class="k-value">${v ?? '—'}</div></div>`;
 }
 function recortar(s, n) { s = s || ''; return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+/* ============================================================
+   Exportación a CSV
+   - columnas: [{ clave, titulo, fmt? }]  (fmt opcional transforma el valor)
+   - filas: array de objetos
+   Descarga compatible con el iframe sandbox de Apps Script.
+   ============================================================ */
+function exportarCSV(nombreArchivo, columnas, filas) {
+  if (!filas || !filas.length) { alert('No hay datos para exportar con los filtros actuales.'); return; }
+
+  const escapar = (v) => {
+    if (v === null || v === undefined) v = '';
+    let s = String(v).replace(/"/g, '""');       // escapa comillas
+    return `"${s}"`;                              // siempre entre comillas
+  };
+
+  const encabezado = columnas.map(c => escapar(c.titulo)).join(';'); // ';' = Excel ES
+  const lineas = filas.map(fila =>
+    columnas.map(c => {
+      let val = fila[c.clave];
+      if (c.fmt) val = c.fmt(val, fila);
+      return escapar(val);
+    }).join(';')
+  );
+  // BOM UTF-8 para que Excel respete acentos.
+  const csv = '\uFEFF' + [encabezado].concat(lineas).join('\r\n');
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  const archivo = `${nombreArchivo}_${stamp}.csv`;
+
+  // Descarga: Blob + enlace temporal. Funciona dentro del iframe sandbox.
+  try {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = archivo;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  } catch (e) {
+    // Fallback: data URI (por si el sandbox bloquea Blob).
+    const a = document.createElement('a');
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = archivo; a.target = '_blank';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+}
 function mostrarError(e) {
   $('#view').innerHTML = `<div class="empty">⚠️ Error al cargar datos.<br><span class="muted">${(e && e.message) || e}</span><br><br>
     Verifica que las tablas normalizadas existan (menú ⚙️ Gestión 5S → Reconstruir tablas).</div>`;
