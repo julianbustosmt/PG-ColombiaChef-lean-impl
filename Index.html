@@ -5,12 +5,9 @@
   <meta charset="utf-8">
   <title><?= appTitle ?></title>
   <!-- Chart.js + plugin matrix (heatmaps) por CDN -->
-  <? if (!this.diagSoloIndex) { ?>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
   <?!= include('CSS'); ?>
-  <? } ?>
-  <? if (this.diagSinJS) { ?><style>body{background:#0f1419;color:#e6edf3}</style><? } ?>
 </head>
 <body>
   <div id="app">
@@ -75,8 +72,7 @@
     </div>
   </div>
 
-  <? if (!this.diagSoloIndex && !this.diagSinJS) { ?>
-  <?!= include('JS'); ?>
-  <? } ?>
+  <!-- El JS se añade desde doGet() con append(), NO aquí, para evitar que el
+       motor de plantillas reprocese su contenido y rompa el sanitizador. -->
 </body>
 </html>

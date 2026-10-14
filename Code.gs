@@ -10,63 +10,26 @@
 
 /** Sirve la aplicación web (SPA). */
 function doGet(e) {
-  // --- MODO DIAGNÓSTICO: abre la URL con ?test=1 para una página mínima.
-  // Si ?test=1 CARGA pero la app normal NO, el problema está en el contenido
-  // (Index/CSS/JS). Si ?test=1 TAMPOCO carga, el problema es despliegue/permisos.
-  if (e && e.parameter && e.parameter.test === '1') {
-    return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px">' +
-      '<h2>✅ Prueba OK</h2><p>La Web App sirve HTML correctamente.</p>' +
-      '<p id="r">Probando backend…</p>' +
-      '<script>google.script.run.withSuccessHandler(function(v){' +
-      'document.getElementById("r").textContent="Backend OK: "+v;})' +
-      '.withFailureHandler(function(err){' +
-      'document.getElementById("r").textContent="Backend ERROR: "+err;})' +
-      '.pingBackend();</script>' +
-      '</body></html>'
-    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
-  // Diagnóstico por partes: sirve SOLO el contenido indicado para aislar
-  // cuál archivo rompe el sanitizador.  ?parte=css | js | cssjs | cdn
-  if (e && e.parameter && e.parameter.parte) {
-    var cual = e.parameter.parte;
-    var cuerpo = '<!DOCTYPE html><html><head><meta charset="utf-8">';
-    // 'cdn' añade los scripts externos de Chart.js en el head (como la app real).
-    if (cual === 'cdn' || cual === 'cssjs') {
-      cuerpo += '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></scr' + 'ipt>';
-      cuerpo += '<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></scr' + 'ipt>';
-    }
-    cuerpo += '</head><body>';
-    cuerpo += '<h2>Diagnóstico: ' + cual + '</h2>';
-    try {
-      if (cual === 'css') cuerpo += include('CSS');
-      else if (cual === 'js') cuerpo += include('JS');
-      else if (cual === 'cssjs' || cual === 'cdn') { cuerpo += include('CSS'); cuerpo += include('JS'); }
-      cuerpo += '<p>Si ves esto, "' + cual + '" NO rompe el sanitizador.</p>';
-    } catch (err) {
-      cuerpo += '<p>Error al incluir ' + cual + ': ' + err + '</p>';
-    }
-    cuerpo += '</body></html>';
-    return HtmlService.createHtmlOutput(cuerpo)
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
-
+  // Evalúa SOLO el Index como plantilla (procesa los <?= ?> y el include del
+  // CSS). El JS NO se inyecta por el template: se añade DESPUÉS con append,
+  // para que el motor de plantillas de Apps Script no reprocese su contenido
+  // (eso rompía el sanitizador cuando el documento completo era grande:
+  //  "Failed to execute 'write' on 'Document': Unexpected identifier 'style'").
   var tpl = HtmlService.createTemplateFromFile('Index');
   tpl.appTitle = CONFIG.APP_TITLE;
   tpl.appSubtitle = CONFIG.APP_SUBTITLE;
   tpl.version = CONFIG.VERSION;
-  // Diagnóstico: ?parte=soloindex sirve el Index SIN incluir CSS/JS, para
-  // aislar si el markup del Index (por template) rompe el sanitizador.
-  tpl.diagSoloIndex = !!(e && e.parameter && e.parameter.parte === 'soloindex');
-  // ?parte=sinjs: Index + CSS pero SIN el JS (para ver si la combinación
-  // Index+CSS por template está bien y el problema es sumar el JS).
-  tpl.diagSinJS = !!(e && e.parameter && e.parameter.parte === 'sinjs');
 
-  return tpl.evaluate()
+  var salida = tpl.evaluate()
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+
+  // El contenido de JS.html (incluye sus etiquetas <script>) se agrega como
+  // bloque ya resuelto, sin pasar por el evaluador de plantillas.
+  salida.append(HtmlService.createHtmlOutputFromFile('JS').getContent());
+
+  return salida;
 }
 
 /** Ping para el modo diagnóstico: confirma que el backend responde. */
