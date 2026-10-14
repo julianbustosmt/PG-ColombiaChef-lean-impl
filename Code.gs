@@ -14,24 +14,30 @@ function doGet(e) {
   // (ves "script OK"), entonces los <script> SÍ corren en tu Web App y el
   // problema está en el contenido grande. Si NO ("script NO ejecutó"), el
   // problema es de autorización/entorno (los scripts no corren).
-  if (e && e.parameter && e.parameter.test === 'script') {
-    return HtmlService.createHtmlOutput(
-      '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:40px">' +
-      '<p id="x">script NO ejecutó (si ves esto, los scripts no corren)</p>' +
-      '<scr' + 'ipt>document.getElementById("x").textContent="✅ script OK: los scripts SÍ se ejecutan";</scr' + 'ipt>' +
-      '</body></html>'
-    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
+  // Ensamblamos el documento con createHtmlOutput (NO con template.evaluate()).
+  // Motivo: el evaluador de plantillas de HtmlService, con un documento grande,
+  // corrompía el JS al reescribirlo ("Document.write: Unexpected identifier
+  // 'style'"). createHtmlOutput NO reescribe de esa forma — es el método que
+  // funcionó en todas las pruebas de diagnóstico (?parte=cssjs).
+  var html = HtmlService.createHtmlOutputFromFile('Index').getContent();
 
-  var tpl = HtmlService.createTemplateFromFile('Index');
-  tpl.appTitle = CONFIG.APP_TITLE;
-  tpl.appSubtitle = CONFIG.APP_SUBTITLE;
-  tpl.version = CONFIG.VERSION;
+  // Resolvemos manualmente los scriptlets del Index:
+  html = html
+    .replace(/<\?= appTitle \?>/g, escaparHtml(CONFIG.APP_TITLE))
+    .replace(/<\?= appSubtitle \?>/g, escaparHtml(CONFIG.APP_SUBTITLE))
+    .replace(/<\?= version \?>/g, escaparHtml(CONFIG.VERSION))
+    .replace(/<\?!= include\('CSS'\); \?>/g, HtmlService.createHtmlOutputFromFile('CSS').getContent())
+    .replace(/<\?!= include\('JS'\); \?>/g, HtmlService.createHtmlOutputFromFile('JS').getContent());
 
-  return tpl.evaluate()
+  return HtmlService.createHtmlOutput(html)
     .setTitle(CONFIG.APP_TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/** Escapa texto para insertarlo de forma segura en HTML. */
+function escaparHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Ping para el modo diagnóstico: confirma que el backend responde. */
