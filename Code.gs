@@ -21,13 +21,18 @@ function doGet(e) {
   // funcionó en todas las pruebas de diagnóstico (?parte=cssjs).
   var html = HtmlService.createHtmlOutputFromFile('Index').getContent();
 
-  // Resolvemos manualmente los scriptlets del Index:
+  // Reemplazo de marcadores {{...}} por su contenido real. Usamos marcadores
+  // de texto plano (no scriptlets <?= ?>) porque createHtmlOutputFromFile NO
+  // procesa scriptlets. Y servimos con createHtmlOutput (no template.evaluate),
+  // que es el método que NO corrompe el documento grande.
+  var css = HtmlService.createHtmlOutputFromFile('CSS').getContent();
+  var js = HtmlService.createHtmlOutputFromFile('JS').getContent();
   html = html
-    .replace(/<\?= appTitle \?>/g, escaparHtml(CONFIG.APP_TITLE))
-    .replace(/<\?= appSubtitle \?>/g, escaparHtml(CONFIG.APP_SUBTITLE))
-    .replace(/<\?= version \?>/g, escaparHtml(CONFIG.VERSION))
-    .replace(/<\?!= include\('CSS'\); \?>/g, HtmlService.createHtmlOutputFromFile('CSS').getContent())
-    .replace(/<\?!= include\('JS'\); \?>/g, HtmlService.createHtmlOutputFromFile('JS').getContent());
+    .split('{{APP_TITLE}}').join(escaparHtml(CONFIG.APP_TITLE))
+    .split('{{APP_SUBTITLE}}').join(escaparHtml(CONFIG.APP_SUBTITLE))
+    .split('{{VERSION}}').join(escaparHtml(CONFIG.VERSION))
+    .split('{{CSS}}').join(css)
+    .split('{{JS}}').join(js);
 
   return HtmlService.createHtmlOutput(html)
     .setTitle(CONFIG.APP_TITLE)

@@ -3,11 +3,11 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <title><?= appTitle ?></title>
+  <title>{{APP_TITLE}}</title>
   <!-- Chart.js + plugin matrix (heatmaps) por CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
-  <?!= include('CSS'); ?>
+  {{CSS}}
 </head>
 <body>
   <div id="app">
@@ -17,8 +17,8 @@
       <div class="brand">
         <div class="brand-logo">5S</div>
         <div class="brand-text">
-          <strong><?= appTitle ?></strong>
-          <span><?= appSubtitle ?></span>
+          <strong>{{APP_TITLE}}</strong>
+          <span>{{APP_SUBTITLE}}</span>
         </div>
       </div>
       <nav class="menu">
@@ -35,7 +35,7 @@
         <a href="javascript:void(0)" class="nav-item" data-view="tendencias">📈 Tendencias</a>
         <a href="javascript:void(0)" class="nav-item" data-view="catalogos">📇 Catálogos</a>
       </nav>
-      <div class="sidebar-foot">v<?= version ?></div>
+      <div class="sidebar-foot">v{{VERSION}}</div>
     </aside>
 
     <!-- ====================== MAIN ====================== -->
@@ -83,6 +83,6 @@
     </div>
   </div>
 
-  <?!= include('JS'); ?>
+  {{JS}}
 </body>
 </html>
