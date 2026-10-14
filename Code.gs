@@ -28,14 +28,21 @@ function doGet(e) {
   }
 
   // Diagnóstico por partes: sirve SOLO el contenido indicado para aislar
-  // cuál archivo rompe el sanitizador.  ?parte=css  |  ?parte=js
+  // cuál archivo rompe el sanitizador.  ?parte=css | js | cssjs | cdn
   if (e && e.parameter && e.parameter.parte) {
     var cual = e.parameter.parte;
-    var cuerpo = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
+    var cuerpo = '<!DOCTYPE html><html><head><meta charset="utf-8">';
+    // 'cdn' añade los scripts externos de Chart.js en el head (como la app real).
+    if (cual === 'cdn' || cual === 'cssjs') {
+      cuerpo += '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></scr' + 'ipt>';
+      cuerpo += '<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></scr' + 'ipt>';
+    }
+    cuerpo += '</head><body>';
     cuerpo += '<h2>Diagnóstico: ' + cual + '</h2>';
     try {
       if (cual === 'css') cuerpo += include('CSS');
       else if (cual === 'js') cuerpo += include('JS');
+      else if (cual === 'cssjs' || cual === 'cdn') { cuerpo += include('CSS'); cuerpo += include('JS'); }
       cuerpo += '<p>Si ves esto, "' + cual + '" NO rompe el sanitizador.</p>';
     } catch (err) {
       cuerpo += '<p>Error al incluir ' + cual + ': ' + err + '</p>';
