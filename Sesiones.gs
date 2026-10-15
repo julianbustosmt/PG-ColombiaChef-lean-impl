@@ -171,16 +171,25 @@ function actualizarEstadosSesiones() {
   var datos = sh.getRange(2, 1, sh.getLastRow() - 1, cab.length).getValues();
   var cambios = 0;
 
+  // Construimos la columna Estado completa en memoria y, si hubo cambios, la
+  // escribimos en UNA sola operación setValues (antes: un setValue por cada
+  // sesión vencida dentro del bucle, es decir N escrituras a Sheets).
+  var columnaEstado = [];
   for (var r = 0; r < datos.length; r++) {
     var estado = limpiar(datos[r][cEstado]);
-    if (estado !== 'Programada' && estado !== 'Pendiente') continue;
-    var f = aFecha(datos[r][cFecha]);
-    if (f && soloFecha(f) < hoy) {
-      sh.getRange(r + 2, cEstado + 1).setValue('Vencida');
-      cambios++;
+    var nuevo = datos[r][cEstado]; // por defecto, sin cambio
+    if (estado === 'Programada' || estado === 'Pendiente') {
+      var f = aFecha(datos[r][cFecha]);
+      if (f && soloFecha(f) < hoy) { nuevo = 'Vencida'; cambios++; }
     }
+    columnaEstado.push([nuevo]);
   }
-  if (cambios) cacheLimpiar();
+
+  if (cambios) {
+    sh.getRange(2, cEstado + 1, columnaEstado.length, 1).setValues(columnaEstado);
+    olvidarHoja(CONFIG.HOJAS.SESIONES);
+    cacheLimpiar();
+  }
   return { actualizadas: cambios };
 }
 

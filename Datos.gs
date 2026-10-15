@@ -10,10 +10,26 @@
  */
 
 /**
- * Lee una hoja completa y devuelve { headers:[], rows:[[...]], idx:{header:col} }.
- * Si la hoja no existe o está vacía, devuelve estructura vacía (no lanza error).
+ * ------------------------------------------------------------
+ *  Memoización POR EJECUCIÓN (request-scoped).
+ * ------------------------------------------------------------
+ *  Apps Script crea una instancia nueva del script por cada
+ *  invocación (cada google.script.run / doGet). Este caché vive
+ *  SOLO durante esa invocación y se descarta al terminar, por lo
+ *  que NUNCA devuelve datos obsoletos entre requests ni mezcla
+ *  datos de usuarios distintos. Su único efecto es evitar que la
+ *  MISMA hoja se lea dos o más veces dentro de la misma operación
+ *  (p.ej. una vista que llama cargarHallazgos() y cargarDetalle()
+ *  varias veces, o compararCumplimiento()).
+ *
+ *  Las funciones que ESCRIBEN en una hoja deben invalidar su
+ *  entrada con olvidarHoja(nombre) para que una lectura posterior
+ *  dentro de la misma ejecución vea el valor actualizado.
  */
-function leerHoja(nombre) {
+var _MEMO_HOJAS = {};
+
+/** Lee una hoja SIN pasar por el memo (acceso directo a Sheets). */
+function leerHojaDirecto(nombre) {
   var sh = ssActiva().getSheetByName(nombre);
   if (!sh) return { headers: [], rows: [], idx: {} };
   var lastRow = sh.getLastRow();
@@ -24,6 +40,31 @@ function leerHoja(nombre) {
   var headers = valores[0].map(limpiar);
   var rows = valores.slice(1);
   return { headers: headers, rows: rows, idx: indiceEncabezados(headers) };
+}
+
+/**
+ * Lee una hoja completa y devuelve { headers:[], rows:[[...]], idx:{header:col} }.
+ * Si la hoja no existe o está vacía, devuelve estructura vacía (no lanza error).
+ *
+ * Memoiza el resultado durante la ejecución actual: la segunda y
+ * sucesivas llamadas con el mismo `nombre` devuelven lo ya leído, sin
+ * volver a tocar Google Sheets.
+ */
+function leerHoja(nombre) {
+  if (_MEMO_HOJAS.hasOwnProperty(nombre)) return _MEMO_HOJAS[nombre];
+  var d = leerHojaDirecto(nombre);
+  _MEMO_HOJAS[nombre] = d;
+  return d;
+}
+
+/**
+ * Invalida el memo de una hoja (o de todas si no se indica nombre).
+ * Debe llamarse tras escribir/append/actualizar una hoja para que una
+ * relectura posterior dentro de la MISMA ejecución vea los cambios.
+ */
+function olvidarHoja(nombre) {
+  if (nombre === undefined) { _MEMO_HOJAS = {}; return; }
+  delete _MEMO_HOJAS[nombre];
 }
 
 /**
@@ -61,6 +102,7 @@ function escribirHoja(nombre, headers, filas) {
     .setBackground('#263238')
     .setFontColor('#ffffff');
   sh.setFrozenRows(1);
+  olvidarHoja(nombre); // el contenido cambió: invalida el memo de la ejecución
 }
 
 // ---- Acceso TRANSACCIONAL (datos primarios: Programacion/Sesiones) -----
@@ -136,6 +178,7 @@ function appendFila(nombre, headers, obj) {
     return obj.hasOwnProperty(h) ? obj[h] : '';
   });
   sh.appendRow(fila);
+  olvidarHoja(nombre); // se añadió una fila: invalida el memo de la ejecución
   return sh.getLastRow();
 }
 
@@ -154,10 +197,19 @@ function actualizarFilaPorId(nombre, colId, idValor, cambios) {
   var datos = sh.getRange(2, 1, sh.getLastRow() - 1, cab.length).getValues();
   for (var r = 0; r < datos.length; r++) {
     if (limpiar(datos[r][cId]) === limpiar(idValor)) {
+      // Aplica todos los cambios sobre la fila en memoria y la reescribe en
+      // UNA sola operación setValues (antes: un setValue por columna). Reduce
+      // las llamadas a Sheets de N (columnas cambiadas) a 1.
+      var fila = datos[r];
+      var huboCambio = false;
       Object.keys(cambios).forEach(function (k) {
         var c = cab.indexOf(k);
-        if (c >= 0) sh.getRange(r + 2, c + 1).setValue(cambios[k]);
+        if (c >= 0) { fila[c] = cambios[k]; huboCambio = true; }
       });
+      if (huboCambio) {
+        sh.getRange(r + 2, 1, 1, cab.length).setValues([fila]);
+        olvidarHoja(nombre); // la fila cambió: invalida el memo de la ejecución
+      }
       return true;
     }
   }
