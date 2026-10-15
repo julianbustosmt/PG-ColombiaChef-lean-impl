@@ -87,8 +87,12 @@ function obtenerDashboard(filtros) {
 
 /** Pantalla Cumplimiento 5S. */
 function obtenerCumplimiento(filtros) {
+  var key = cacheKey('cumplimiento', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var det = filtrarDetalle(cargarDetalle(), filtros);
-  return {
+  var res = {
     general: cumplimientoDesdeDetalle(det).pct,
     porRuta: cumplimientoPorRuta(det),
     porModulo: cumplimientoPorGrupo(det, 'modulo'),
@@ -99,22 +103,34 @@ function obtenerCumplimiento(filtros) {
       return { eje: r.codigo, valor: r.cumplimiento };
     })
   };
+  cachePut(key, res);
+  return res;
 }
 
 /** Pantalla Análisis de Criterios. */
 function obtenerCumplimientoPorCriterio(filtros) {
+  var key = cacheKey('cumplCriterio', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var det = filtrarDetalle(cargarDetalle(), filtros);
   var ruta = filtros && filtros.ruta ? filtros.ruta : null;
-  return {
+  var res = {
     ranking: rankingCriterios(det, ruta),
     heatmapModuloCriterio: heatmapModuloCriterio(det, ruta)
   };
+  cachePut(key, res);
+  return res;
 }
 
 /** Pantalla Gestión de Hallazgos. */
 function obtenerHallazgos(filtros) {
+  var key = cacheKey('hallazgos', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var hall = filtrarHallazgos(cargarHallazgos(), filtros);
-  return {
+  var res = {
     kpis: kpisHallazgos(hall),
     porEstado: contarPor(hall, 'estado'),
     porModulo: contarPor(hall, 'modulo'),
@@ -136,6 +152,8 @@ function obtenerHallazgos(filtros) {
       };
     })
   };
+  cachePut(key, res);
+  return res;
 }
 
 // ============================================================
@@ -148,6 +166,10 @@ function obtenerHallazgos(filtros) {
  */
 function obtenerInspecciones(filtros) {
   filtros = filtros || {};
+  var key = cacheKey('inspecciones', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var todas = cargarInspecciones();
   var insp = filtrarInspecciones(todas, filtros);
 
@@ -166,7 +188,7 @@ function obtenerInspecciones(filtros) {
   var completadas = insp.filter(function (i) { return i.completada; }).length;
   var conSeg = insp.filter(function (i) { return i.requiereSeguimiento; }).length;
 
-  return {
+  var res = {
     kpis: {
       total: insp.length,
       completadas: completadas,
@@ -187,6 +209,8 @@ function obtenerInspecciones(filtros) {
       };
     })
   };
+  cachePut(key, res);
+  return res;
 }
 
 /** Pantalla Seguimiento de acciones. */
@@ -220,11 +244,15 @@ function obtenerDetalleInspeccion(idInspeccion) {
 /** Pantalla Tendencias. */
 function obtenerTendencias(filtros) {
   var periodo = filtros && filtros.periodo || 'mes';
+  var key = cacheKey('tendencias', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var det = filtrarDetalle(cargarDetalle(), filtros);
   var insp = filtrarInspecciones(cargarInspecciones(), filtros);
   var hall = filtrarHallazgos(cargarHallazgos(), filtros);
 
-  return {
+  var res = {
     cumplimiento: evolucionCumplimiento(det, periodo),
     inspecciones: serieTemporal(insp, 'fecha', periodo, function (g) { return g.length; }),
     hallazgosGenerados: serieTemporal(hall, 'fecha', periodo, function (g) { return g.length; }),
@@ -235,15 +263,21 @@ function obtenerTendencias(filtros) {
       hall.filter(function (h) { return h.correccionInmediata; }),
       'fecha', periodo, function (g) { return g.length; })
   };
+  cachePut(key, res);
+  return res;
 }
 
 /** Pantalla Estandarización (análisis de actividades). */
 function obtenerActividadesEstandarizacion(filtros) {
+  var key = cacheKey('estandarizacion', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var hall = filtrarHallazgos(cargarHallazgos(), filtros);
   var requieren = hall.filter(function (h) { return h.requiereEstandarizacion; });
   var tiempos = hall.filter(function (h) { return h.tiempoCorreccionMin !== null; });
 
-  return {
+  var res = {
     totalRequierenMedicion: requieren.length,
     recurrentes: hall.filter(function (h) { return h.recurrente; }).length,
     noRecurrentes: hall.filter(function (h) { return !h.recurrente; }).length,
@@ -253,15 +287,21 @@ function obtenerActividadesEstandarizacion(filtros) {
     // Análisis de recurrencia AVANZADO (por similitud de texto + frecuencia).
     recurrencia: analizarRecurrencia(filtros)
   };
+  cachePut(key, res);
+  return res;
 }
 
 /** Pantalla Mapa 5S (tarjetas por módulo). */
 function obtenerMapa5S(filtros) {
+  var key = cacheKey('mapa5S', filtros);
+  var cacheado = cacheGet(key);
+  if (cacheado) return cacheado;
+
   var det = filtrarDetalle(cargarDetalle(), filtros);
   var hall = filtrarHallazgos(cargarHallazgos(), filtros);
   var cumplPorMod = cumplimientoPorGrupo(det, 'modulo');
 
-  return cumplPorMod.map(function (c) {
+  var res = cumplPorMod.map(function (c) {
     var hMod = hall.filter(function (h) { return clave(h.modulo) === clave(c.grupo); });
     return {
       modulo: c.grupo,
@@ -271,6 +311,8 @@ function obtenerMapa5S(filtros) {
       hallazgosVencidos: hMod.filter(function (h) { return h.estado === 'Vencido'; }).length
     };
   });
+  cachePut(key, res);
+  return res;
 }
 
 // ---- Helpers de agregación para la API --------------------------------

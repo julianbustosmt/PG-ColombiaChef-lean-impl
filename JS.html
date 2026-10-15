@@ -144,11 +144,15 @@ function api(fn, ...args) {
   });
 }
 
-/* ---------- Inicialización ---------- */
-window.addEventListener('DOMContentLoaded', async () => {
+/* ---------- Inicialización ----------
+   Arranque no bloqueante: pintamos la vista inicial de inmediato y cargamos
+   las opciones de filtros EN PARALELO. Antes, el `await cargarOpcionesFiltros()`
+   retrasaba el primer render hasta tener los selects llenos; los filtros no son
+   necesarios para mostrar el dashboard, así que ya no bloquean la pantalla. */
+window.addEventListener('DOMContentLoaded', () => {
   bindUI();
-  await cargarOpcionesFiltros();
-  routear();
+  cargarOpcionesFiltros();          // no se espera: llena los selects cuando llega
+  routear();                         // pinta la vista inicial sin esperar a los filtros
   window.addEventListener('hashchange', routear);
 });
 
@@ -267,8 +271,17 @@ function routear() {
    VISTA: DASHBOARD
    ============================================================ */
 async function renderDashboard() {
+  // Las dos peticiones del dashboard (datos 5S y banda de programación) son
+  // independientes. Las lanzamos EN PARALELO para que sus latencias se solapen
+  // en vez de sumarse. Guardamos la promesa de programación y la consumimos al
+  // final (renderBandaProgramacion), cuando ya existe el contenedor #view.
+  const filtrosSnapshot = App.filtros;
+  const promDashboard = api('obtenerDashboard', filtrosSnapshot);
+  const promProgramacion = api('obtenerDashboardProgramacion', filtrosSnapshot)
+    .catch(() => null); // la banda es secundaria: si falla, no rompe el dashboard
+
   let d;
-  try { d = await api('obtenerDashboard', App.filtros); }
+  try { d = await promDashboard; }
   catch (e) { return mostrarError(e); }
   const k = d.kpis;
 
@@ -321,12 +334,18 @@ async function renderDashboard() {
   barChart('c-mod', d.topModulosProblema.map(x => x.modulo), d.topModulosProblema.map(x => x.abiertos), 'Abiertos');
 
   // --- Banda de PROGRAMACIÓN (Fase 5, sección 20) ---
-  renderBandaProgramacion();
+  // Reutiliza la promesa ya en vuelo (lanzada al inicio, en paralelo).
+  renderBandaProgramacion(promProgramacion);
 }
 
-/* Inserta en el Dashboard los KPIs y gráficos de programación. */
-async function renderBandaProgramacion() {
-  let p; try { p = await api('obtenerDashboardProgramacion', App.filtros); } catch (e) { return; }
+/* Inserta en el Dashboard los KPIs y gráficos de programación.
+   `promProgramacion` es la promesa ya en vuelo lanzada por renderDashboard;
+   si no se pasa (compatibilidad), hace la petición aquí. */
+async function renderBandaProgramacion(promProgramacion) {
+  let p;
+  try { p = await (promProgramacion || api('obtenerDashboardProgramacion', App.filtros)); }
+  catch (e) { return; }
+  if (!p) return; // la petición falló (ya se capturó); la banda simplemente no se pinta
   const k = p.kpis;
 
   const html = `
